@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+ * Astrolabe Color System CSS Variables
+ * Synchronized with src/lib/colors.ts
+ * ============================================ */
+
+:root {
+  /* Background Colors */
+  --background: #0a0a0f;
+  --background-panel: #111118;
+  --background-card: #111118;
+  --background-dots: #374151;
+  --foreground: #ededed;
+
+  /* Core Colors (from Astrolabe Palette) */
+  --core-deep-red: #7a0101;
+  --core-red: #be1420;
+  --core-cream: #fbf0d9;
+  --core-deep-blue: #012f48;
+  --core-steel-blue: #669aba;
+
+  /* Status Colors */
+  --status-proven: #2ecc71;
+  --status-sorry: #e67e22;
+  --status-stated: #636e72;
+  --status-error: #e74c3c;
+  --status-unknown: #95a5a6;
+
+  /* Node Type Colors */
+  --node-theorem: #833AB4;
+  --node-lemma: #405DE6;
+  --node-definition: #FCAF45;
+  --node-proposition: #FFDC80;
+  --node-corollary: #E1306C;
+  --node-example: #5851DB;
+  --node-axiom: #F77737;
+  --node-conjecture: #FD1D1D;
+  --node-structure: #1abc9c;
+  --node-class: #3498db;
+  --node-instance: #669aba;
+
+  /* Edge Colors */
+  --edge-default: #4a5568;
+  --edge-verified: #2ecc71;
+  --edge-hover: #669aba;
+
+  /* Neutral Colors */
+  --neutral-deep-space: #0a0a0f;
+  --neutral-panel: #111118;
+  --neutral-border: #1a1a22;
+  --neutral-dark-gray: #2c3e50;
+  --neutral-mid-gray: #636e72;
+  --neutral-light-gray: #95a5a6;
+  --neutral-silver: #bdc3c7;
+  --neutral-cloud: #ecf0f1;
+
+  /* Semantic Colors */
+  --semantic-error: #e74c3c;
+  --semantic-warning: #e67e22;
+  --semantic-success: #2ecc71;
+  --semantic-info: #3498db;
+
+  /* Highlight Colors */
+  --highlight-source: #00d4ff;
+  --highlight-sink: #ff6b35;
+  --highlight-selected: #ffffff;
+}
+
+/* ============================================
+ * Base Styles
+ * ============================================ */
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ============================================
+ * Scrollbar Styles
+ * ============================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--neutral-panel);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-dark-gray);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-mid-gray);
+}
+
+/* ============================================
+ * Selection Styles
+ * ============================================ */
+
+::selection {
+  background: var(--core-steel-blue);
+  color: white;
+}
+
+/* ============================================
+ * React Flow Overrides
+ * ============================================ */
+
+.react-flow__node {
+  cursor: pointer;
+}
+
+.react-flow__edge-path {
+  stroke-width: 2;
+}
+
+.react-flow__controls {
+  background: var(--neutral-panel) !important;
+  border: 1px solid var(--neutral-border) !important;
+  border-radius: 8px !important;
+}
+
+.react-flow__controls-button {
+  background: var(--neutral-panel) !important;
+  border-color: var(--neutral-border) !important;
+  color: var(--neutral-light-gray) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--neutral-dark-gray) !important;
+}
+
+.react-flow__minimap {
+  background: var(--neutral-panel) !important;
+  border: 1px solid var(--neutral-border) !important;
+  border-radius: 8px !important;
+}
+
+/* ============================================
+ * Custom Animations
+ * ============================================ */
+
+/* Slow pulsing green glow for "add to canvas" eye icon */
+@keyframes pulse-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.8));
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 2px rgba(74, 222, 128, 0.3));
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}

@@ -1,0 +1,6 @@
+{
+  "themes": [
+    { "id": "default", "name": "默认" }
+  ],
+  "current": "default"
+}

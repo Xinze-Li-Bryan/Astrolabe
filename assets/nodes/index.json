@@ -1,0 +1,16 @@
+{
+  "shapes": [
+    { "id": "sphere", "name": "球体" },
+    { "id": "box", "name": "立方体" },
+    { "id": "octahedron", "name": "八面体" },
+    { "id": "tetrahedron", "name": "四面体" },
+    { "id": "dodecahedron", "name": "十二面体" },
+    { "id": "icosahedron", "name": "二十面体" },
+    { "id": "cone", "name": "圆锥" },
+    { "id": "cylinder", "name": "圆柱" },
+    { "id": "torus", "name": "圆环" },
+    { "id": "torusKnot", "name": "环结" },
+    { "id": "ring", "name": "环形" },
+    { "id": "capsule", "name": "胶囊" }
+  ]
+}

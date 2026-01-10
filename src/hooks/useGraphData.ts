@@ -1,0 +1,257 @@
+/**
+ * useGraphData Hook
+ *
+ * Load Node and Edge data from Python backend
+ * Adapted for backend API: loadProject/refreshProject
+ *
+ * Note: This version uses Python backend API instead of Tauri invoke
+ */
+
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { loadProject, refreshProject, checkProjectStatus, type ProjectStatus } from '@/lib/api'
+import type { Node, Edge } from '@/types/node'
+import type {
+  AstrolabeNode,
+  AstrolabeEdge,
+  NodeKind,
+  GraphNode,
+  GraphLink,
+} from '@/types/graph'
+import { useFileWatch } from './useFileWatch'
+
+// Re-export types for backward compatibility
+export type { GraphNode, GraphLink } from '@/types/graph'
+
+// Node types that require proof status halo (matches backend PROOF_REQUIRING_KINDS)
+const PROOF_REQUIRING_KINDS = ['theorem', 'lemma', 'proposition', 'corollary']
+
+export interface GraphData {
+  // New types (internal use)
+  nodes: AstrolabeNode[]
+  edges: AstrolabeEdge[]
+
+  // Legacy compatibility (still used by page.tsx and Graph3D)
+  legacyNodes: GraphNode[]
+  links: GraphLink[]
+
+  loading: boolean
+  reload: () => void
+  reloadMeta: () => void  // Lightweight reload for meta.json changes
+
+  // Project status
+  projectStatus: ProjectStatus | null
+  needsInit: boolean
+  notSupported: boolean  // Not a Lean 4 Lake project
+  recheckStatus: () => Promise<ProjectStatus | null | undefined>
+}
+
+/**
+ * Convert backend Node to AstrolabeNode
+ *
+ * Node types requiring proof (theorem/lemma etc.) default to 'stated' status
+ * Other types (definition/axiom etc.) are also set to 'stated'
+ */
+function backendNodeToAstrolabe(node: Node): AstrolabeNode {
+  // All nodes default to 'stated' status (no status halo)
+  const status: 'proven' | 'sorry' | 'error' | 'stated' | 'unknown' = 'stated'
+
+  return {
+    id: node.id,
+    name: node.name,
+    kind: node.kind as NodeKind,
+    status,
+    leanFile: { path: node.filePath, line: node.lineNumber },
+    notes: node.meta.notes,  // User notes from backend meta.json
+
+    // Default style (from graph.json)
+    defaultColor: node.defaultColor,
+    defaultSize: node.defaultSize,
+    defaultShape: node.defaultShape,
+
+    // User overrides (from meta.json)
+    color: node.meta.color,
+    size: node.meta.size,
+    shape: node.meta.shape,
+    effect: node.meta.effect,
+
+    // position has been moved to canvas.json, no longer read from node.meta
+    pinned: node.meta.pinned ?? false,
+    visible: true, // visibility is managed by canvas.json, not meta.json
+  }
+}
+
+/**
+ * Convert backend Edge to AstrolabeEdge
+ */
+function backendEdgeToAstrolabe(edge: Edge): AstrolabeEdge {
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    fromLean: edge.fromLean,
+
+    // Default style (from graph.json)
+    defaultColor: edge.defaultColor,
+    defaultWidth: edge.defaultWidth,
+    defaultStyle: edge.defaultStyle,
+
+    // User overrides (from meta.json)
+    color: edge.meta?.color,
+    width: edge.meta?.width,
+    style: edge.meta?.style,
+    effect: edge.meta?.effect,
+
+    visible: edge.visible ?? true,
+  }
+}
+
+export function useGraphData(projectPath: string): GraphData {
+  const [nodes, setNodes] = useState<AstrolabeNode[]>([])
+  const [edges, setEdges] = useState<AstrolabeEdge[]>([])
+  const [loading, setLoading] = useState(false)
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null)
+  const loadedRef = useRef(false)
+
+  // Check project status
+  const recheckStatus = useCallback(async () => {
+    if (!projectPath) return
+    try {
+      const status = await checkProjectStatus(projectPath)
+      setProjectStatus(status)
+      return status
+    } catch (err) {
+      console.error('[useGraphData] Check status failed:', err)
+      return null
+    }
+  }, [projectPath])
+
+  const loadGraph = useCallback(async () => {
+    if (!projectPath || loadedRef.current) return
+    loadedRef.current = true
+
+    setLoading(true)
+
+    try {
+      // Check status first
+      const status = await recheckStatus()
+
+      // If needs initialization or not supported, don't load project
+      if (status?.needsInit || status?.notSupported) {
+        console.log('[useGraphData] Project needs initialization or not supported')
+        setLoading(false)
+        return
+      }
+
+      // Call backend API to load project
+      const response = await loadProject(projectPath)
+
+      // Convert backend nodes to AstrolabeNode
+      const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
+      const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
+
+      setNodes(astrolabeNodes)
+      setEdges(astrolabeEdges)
+
+      console.log(`[useGraphData] Loaded ${astrolabeNodes.length} nodes and ${astrolabeEdges.length} edges from backend`)
+
+    } catch (err) {
+      console.error('Failed to load graph from backend:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [projectPath, recheckStatus])
+
+  useEffect(() => {
+    loadGraph()
+  }, [loadGraph])
+
+  const reload = useCallback(async () => {
+    loadedRef.current = false
+    setNodes([])
+    setEdges([])
+    setLoading(true)
+
+    try {
+      // Call backend refresh API
+      await refreshProject(projectPath)
+      // Then reload the data
+      const response = await loadProject(projectPath)
+
+      const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
+      const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
+
+      setNodes(astrolabeNodes)
+      setEdges(astrolabeEdges)
+
+      console.log(`[useGraphData] Reloaded ${astrolabeNodes.length} nodes and ${astrolabeEdges.length} edges`)
+    } catch (err) {
+      console.error('Failed to reload graph:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [projectPath])
+
+  // Meta refresh: only reload data, don't reset state
+  const reloadMeta = useCallback(async () => {
+    if (!projectPath) return
+    try {
+      const response = await loadProject(projectPath)
+
+      const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
+      const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
+
+      setNodes(astrolabeNodes)
+      setEdges(astrolabeEdges)
+
+      console.log(`[useGraphData] Meta refreshed: ${astrolabeNodes.length} nodes`)
+    } catch (err) {
+      console.error('Failed to reload meta:', err)
+    }
+  }, [projectPath])
+
+  // WebSocket file change monitoring
+  useFileWatch(projectPath, {
+    onRefresh: reload,       // .ilean changes → full reload
+    onMetaRefresh: reloadMeta, // meta.json changes → only refresh meta
+  })
+
+  // ============================================
+  // Legacy compatibility: convert to old types
+  // Priority: user overrides > defaults
+  // ============================================
+  const legacyNodes: GraphNode[] = nodes.map(node => ({
+    id: node.id,
+    name: node.name,
+    type: node.kind,
+    status: node.status,
+    leanFilePath: node.leanFile?.path,
+    leanLineNumber: node.leanFile?.line,
+    notes: node.notes,  // User notes
+    customColor: node.color ?? node.defaultColor,
+    customSize: node.size ?? node.defaultSize,
+    customEffect: node.effect,
+    x: node.position?.x,
+    y: node.position?.y,
+    z: node.position?.z,
+  }))
+
+  const links: GraphLink[] = edges.map(edge => ({
+    source: edge.source,
+    target: edge.target,
+    type: 'lean',
+  }))
+
+  return {
+    nodes,
+    edges,
+    legacyNodes,
+    links,
+    loading,
+    reload,
+    reloadMeta,  // Expose for manual refresh after meta updates
+    projectStatus,
+    needsInit: projectStatus?.needsInit ?? false,
+    notSupported: projectStatus?.notSupported ?? false,
+    recheckStatus,
+  }
+}

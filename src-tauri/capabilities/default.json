@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "default",
+  "description": "Default capability for Astrolabe",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "dialog:default",
+    "shell:default",
+    "shell:allow-stdin-write",
+    "shell:allow-kill",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "lake",
+          "cmd": "lake",
+          "args": true
+        },
+        {
+          "name": "lean",
+          "cmd": "lean",
+          "args": true
+        },
+        {
+          "name": "python",
+          "cmd": "python",
+          "args": true
+        },
+        {
+          "name": "python3",
+          "cmd": "python3",
+          "args": true
+        },
+        {
+          "name": "uvicorn",
+          "cmd": "uvicorn",
+          "args": true
+        },
+        {
+          "name": "astrolabe-server",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}

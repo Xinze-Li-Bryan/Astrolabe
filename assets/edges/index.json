@@ -1,0 +1,8 @@
+{
+  "styles": [
+    { "id": "solid", "name": "实线" },
+    { "id": "dashed", "name": "虚线" },
+    { "id": "dotted", "name": "点线" },
+    { "id": "wavy", "name": "波浪线" }
+  ]
+}

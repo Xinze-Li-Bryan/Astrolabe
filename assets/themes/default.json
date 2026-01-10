@@ -1,0 +1,22 @@
+{
+  "id": "default",
+  "name": "默认主题",
+
+  "nodes": {
+    "theorem": { "color": "#A855F7", "size": 1.2, "shape": "sphere" },
+    "lemma": { "color": "#6366F1", "size": 0.7, "shape": "tetrahedron" },
+    "definition": { "color": "#FBBF24", "size": 1.0, "shape": "box" },
+    "axiom": { "color": "#FB923C", "size": 1.1, "shape": "icosahedron" },
+    "structure": { "color": "#2DD4BF", "size": 1.0, "shape": "torus" },
+    "class": { "color": "#4ADE80", "size": 1.0, "shape": "torusKnot" },
+    "instance": { "color": "#38BDF8", "size": 0.9, "shape": "capsule" },
+    "inductive": { "color": "#F472B6", "size": 1.0, "shape": "dodecahedron" },
+    "example": { "color": "#818CF8", "size": 0.8, "shape": "cylinder" },
+    "default": { "color": "#A1A1AA", "size": 1.0, "shape": "ring" }
+  },
+
+  "edges": {
+    "from_lean": { "color": "#2ecc71", "width": 1.0, "style": "solid" },
+    "custom": { "color": "#888888", "width": 0.8, "style": "dashed" }
+  }
+}

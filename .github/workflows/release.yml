@@ -1,0 +1,184 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            name: macOS-arm64
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+            name: macOS-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build Python backend sidecar
+        run: |
+          cd backend
+          pip install -e ".[dev]"
+          pip install pyinstaller
+          python -m PyInstaller --clean --noconfirm astrolabe-server.spec
+          mkdir -p ../src-tauri/binaries
+          cp dist/astrolabe-server ../src-tauri/binaries/astrolabe-server-${{ matrix.target }}
+          chmod +x ../src-tauri/binaries/astrolabe-server-${{ matrix.target }}
+          ls -la ../src-tauri/binaries/
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --target ${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.name }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Display artifacts
+        run: find artifacts -type f | head -50
+
+      - name: Generate updater JSON
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Find signature files
+          MACOS_SIG_FILE=$(find artifacts -name "*.app.tar.gz.sig" | head -1)
+          MACOS_SIG=""
+          if [ -n "$MACOS_SIG_FILE" ]; then
+            MACOS_SIG=$(cat "$MACOS_SIG_FILE")
+          fi
+
+          BASE_URL="https://github.com/Lean-Astrolabe/Astrolabe-Releases/releases/download/${GITHUB_REF_NAME}"
+
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "notes": "See release notes on GitHub",
+            "pub_date": "${DATE}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${MACOS_SIG}",
+                "url": "${BASE_URL}/Astrolabe.app.tar.gz"
+              },
+              "darwin-x86_64": {
+                "signature": "${MACOS_SIG}",
+                "url": "${BASE_URL}/Astrolabe.app.tar.gz"
+              }
+            }
+          }
+          EOF
+
+          cat latest.json
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+
+          # Copy DMG files
+          find artifacts -name "*.dmg" -exec cp {} release-files/ \;
+
+          # Copy updater files
+          find artifacts -name "*.app.tar.gz" -exec cp {} release-files/ \;
+          find artifacts -name "*.app.tar.gz.sig" -exec cp {} release-files/ \;
+
+          # Copy updater JSON
+          cp latest.json release-files/
+
+          ls -la release-files/
+
+      - name: Create release in target repo
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: Lean-Astrolabe/Astrolabe-Releases
+          token: ${{ secrets.RELEASE_PAT }}
+          tag_name: ${{ github.ref_name }}
+          name: Astrolabe ${{ github.ref_name }}
+          body: |
+            ## Astrolabe ${{ github.ref_name }}
+
+            ### Downloads
+
+            | Platform | Download |
+            |----------|----------|
+            | macOS (Apple Silicon) | `Astrolabe_*_aarch64.dmg` |
+            | macOS (Intel) | `Astrolabe_*_x64.dmg` |
+
+            ### macOS Users
+
+            On first launch, macOS may show "damaged and can't be opened" because the app is not notarized by Apple.
+
+            **Fix (choose one):**
+
+            1. Run in Terminal:
+               ```bash
+               xattr -cr /Applications/Astrolabe.app
+               ```
+
+            2. Or: Right-click the app → Open → Confirm Open
+
+            ### Auto-Update
+
+            The `latest.json` file is used for Tauri's built-in updater.
+          files: release-files/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
