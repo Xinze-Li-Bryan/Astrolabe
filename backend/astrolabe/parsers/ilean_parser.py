@@ -237,6 +237,44 @@ DECL_KEYWORDS = {
     "instance", "axiom", "abbrev", "example", "inductive", "opaque"
 }
 
+# Lean 4 declaration modifiers that can precede keywords
+DECL_MODIFIERS = {
+    "noncomputable", "protected", "private", "partial", "unsafe", "scoped"
+}
+
+
+def find_decl_keyword_in_line(line: str) -> str | None:
+    """
+    Find a declaration keyword in a line, handling modifiers.
+
+    Returns the keyword if found, None otherwise.
+    Examples:
+        "theorem foo" -> "theorem"
+        "noncomputable def bar" -> "def"
+        "protected theorem baz" -> "theorem"
+        "@[simp] def qux" -> "def"
+    """
+    stripped = line.lstrip()
+    if not stripped:
+        return None
+
+    words = stripped.split()
+
+    for i, word in enumerate(words):
+        # Skip attribute annotations like @[simp]
+        if word.startswith("@["):
+            continue
+        # Skip modifiers
+        if word in DECL_MODIFIERS:
+            continue
+        # Check if it's a declaration keyword
+        if word in DECL_KEYWORDS:
+            return word
+        # If we hit something else, stop looking
+        break
+
+    return None
+
 
 def detect_sorry(content: str) -> bool:
     """
@@ -297,6 +335,8 @@ def find_declaration_start(lines: list[str], line_hint: int) -> int:
     The definition position provided by .ilean may be somewhere inside the declaration,
     need to search upward to find the line where theorem/lemma/def etc. keyword is located
 
+    Handles modifiers like: noncomputable def, protected theorem, @[simp] lemma, etc.
+
     Args:
         lines: all lines in source file
         line_hint: line number provided by .ilean (0-indexed)
@@ -313,9 +353,8 @@ def find_declaration_start(lines: list[str], line_hint: int) -> int:
     # Search upward from start_line to beginning of file (no line limit)
     for i in range(start_line, -1, -1):
         line = lines[i]
-        stripped = line.lstrip()
-        first_word = stripped.split()[0] if stripped.split() else ""
-        if first_word in DECL_KEYWORDS:
+        keyword = find_decl_keyword_in_line(line)
+        if keyword is not None:
             return i
 
     # If keyword not found, return valid start line
@@ -349,9 +388,8 @@ def extract_full_declaration(lines: list[str], line_start: int) -> str:
 
         # After skipping the starting line, stop if encountering a new top-level declaration
         if i > actual_start:
-            stripped = line.lstrip()
-            first_word = stripped.split()[0] if stripped.split() else ""
-            if first_word in DECL_KEYWORDS:
+            keyword = find_decl_keyword_in_line(line)
+            if keyword is not None:
                 break
 
         result.append(line)
@@ -360,30 +398,48 @@ def extract_full_declaration(lines: list[str], line_start: int) -> str:
 
 
 def infer_kind(content: str) -> str:
-    """Infer declaration type from content"""
-    content_lower = content.strip().lower()
+    """
+    Infer declaration type from content.
 
-    if content_lower.startswith("theorem"):
+    Handles modifiers like: noncomputable, protected, private, partial, unsafe, scoped
+    and attributes like: @[simp], @[inline], etc.
+
+    Examples:
+        "theorem foo : ..." -> "theorem"
+        "noncomputable def bar : ..." -> "definition"
+        "@[simp] protected lemma baz : ..." -> "lemma"
+    """
+    # Get the first line to find the keyword
+    first_line = content.strip().split('\n')[0] if content else ""
+
+    # Use the helper to find the keyword
+    keyword = find_decl_keyword_in_line(first_line)
+
+    if keyword is None:
+        return "definition"  # fallback
+
+    # Map keywords to kinds
+    if keyword == "theorem":
         return "theorem"
-    elif content_lower.startswith("lemma"):
+    elif keyword == "lemma":
         return "lemma"
-    elif content_lower.startswith("def ") or content_lower.startswith("definition"):
+    elif keyword in ("def", "definition"):
         return "definition"
-    elif content_lower.startswith("structure"):
+    elif keyword == "structure":
         return "structure"
-    elif content_lower.startswith("class"):
+    elif keyword == "class":
         return "class"
-    elif content_lower.startswith("instance"):
+    elif keyword == "instance":
         return "instance"
-    elif content_lower.startswith("axiom"):
+    elif keyword == "axiom":
         return "axiom"
-    elif content_lower.startswith("inductive"):
+    elif keyword == "inductive":
         return "inductive"
-    elif content_lower.startswith("abbrev"):
+    elif keyword == "abbrev":
         return "definition"
-    elif content_lower.startswith("example"):
+    elif keyword == "example":
         return "example"
-    elif content_lower.startswith("opaque"):
+    elif keyword == "opaque":
         return "opaque"
     else:
         return "definition"
