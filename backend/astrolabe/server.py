@@ -22,7 +22,7 @@ from watchfiles import awatch
 
 from .project import Project
 from .graph_cache import GraphCache
-from .canvas import CanvasStore, CanvasData
+from .unified_storage import UnifiedStorage
 
 
 # Project cache
@@ -34,6 +34,18 @@ def get_project(path: str) -> Project:
     if path not in _projects:
         _projects[path] = Project(path)
     return _projects[path]
+
+
+async def get_project_storage(path: str) -> UnifiedStorage:
+    """Get UnifiedStorage for a project, loading if necessary"""
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+        if not project.storage:
+            await project.load()
+    return project.storage
 
 
 def should_watch_file(change_type, file_path: str) -> bool:
@@ -377,7 +389,7 @@ async def delete_edge_meta(
 @app.post("/api/project/positions")
 async def save_positions(request: PositionsUpdateRequest):
     """
-    Save node 3D positions to canvas.json
+    Save node 3D positions to meta.json
 
     Used to save Force3D layout calculated by frontend or positions after user dragging.
     Positions are merged incrementally, only updating nodes included in the request.
@@ -391,14 +403,14 @@ async def save_positions(request: PositionsUpdateRequest):
             }
         }
     """
-    # Positions are now uniformly stored in canvas.json
-    store = CanvasStore(request.path)
-    canvas = store.update_positions(request.positions)
+    storage = await get_project_storage(request.path)
+    storage.update_positions(request.positions)
+    canvas = storage.get_canvas()
 
     return {
         "status": "ok",
         "updated": len(request.positions),
-        "positions": canvas.positions,
+        "positions": canvas["positions"],
     }
 
 
@@ -561,85 +573,88 @@ async def get_node_deps(
 @app.get("/api/canvas")
 async def get_canvas(path: str = Query(..., description="Project path")):
     """Load canvas state"""
-    store = CanvasStore(path)
-    canvas = store.load()
+    storage = await get_project_storage(path)
+    canvas = storage.get_canvas()
 
     return {
-        "visible_nodes": canvas.visible_nodes,
-        "positions": canvas.positions,
+        "visible_nodes": canvas["visible_nodes"],
+        "positions": canvas["positions"],
     }
 
 
 @app.post("/api/canvas")
 async def save_canvas(request: CanvasSaveRequest):
     """Save canvas state"""
-    store = CanvasStore(request.path)
-    canvas = CanvasData(
-        visible_nodes=request.visible_nodes,
-        positions=request.positions,
-    )
-    store.save(canvas)
+    storage = await get_project_storage(request.path)
+    storage.set_canvas({
+        "visible_nodes": request.visible_nodes,
+        "positions": request.positions,
+    })
 
-    return {"status": "ok", "nodes": len(canvas.visible_nodes)}
+    return {"status": "ok", "nodes": len(request.visible_nodes)}
 
 
 @app.post("/api/canvas/add")
 async def add_to_canvas(request: CanvasAddNodeRequest):
     """Add node to canvas"""
-    store = CanvasStore(request.path)
-    canvas = store.add_node(request.node_id)
+    storage = await get_project_storage(request.path)
+    storage.add_node_to_canvas(request.node_id)
+    canvas = storage.get_canvas()
 
     return {
         "status": "ok",
-        "visible_nodes": canvas.visible_nodes,
-        "positions": canvas.positions,
+        "visible_nodes": canvas["visible_nodes"],
+        "positions": canvas["positions"],
     }
 
 
 @app.post("/api/canvas/add-batch")
 async def add_batch_to_canvas(request: CanvasAddNodesRequest):
     """Batch add nodes to canvas"""
-    store = CanvasStore(request.path)
-    canvas = store.add_nodes(request.node_ids)
+    storage = await get_project_storage(request.path)
+    storage.add_nodes_to_canvas(request.node_ids)
+    canvas = storage.get_canvas()
 
     return {
         "status": "ok",
-        "visible_nodes": canvas.visible_nodes,
-        "positions": canvas.positions,
+        "visible_nodes": canvas["visible_nodes"],
+        "positions": canvas["positions"],
     }
 
 
 @app.post("/api/canvas/remove")
 async def remove_from_canvas(request: CanvasAddNodeRequest):
     """Remove node from canvas"""
-    store = CanvasStore(request.path)
-    canvas = store.remove_node(request.node_id)
+    storage = await get_project_storage(request.path)
+    storage.remove_node_from_canvas(request.node_id)
+    canvas = storage.get_canvas()
 
     return {
         "status": "ok",
-        "visible_nodes": canvas.visible_nodes,
-        "positions": canvas.positions,
+        "visible_nodes": canvas["visible_nodes"],
+        "positions": canvas["positions"],
     }
 
 
 @app.post("/api/canvas/positions")
 async def update_canvas_positions(request: PositionsUpdateRequest):
     """Update canvas node 3D positions"""
-    store = CanvasStore(request.path)
-    canvas = store.update_positions(request.positions)
+    storage = await get_project_storage(request.path)
+    storage.update_positions(request.positions)
+    canvas = storage.get_canvas()
 
     return {
         "status": "ok",
         "updated": len(request.positions),
-        "positions": canvas.positions,
+        "positions": canvas["positions"],
     }
 
 
 @app.post("/api/canvas/clear")
 async def clear_canvas(path: str = Query(..., description="Project path")):
     """Clear canvas"""
-    canvas_store = CanvasStore(path)
-    canvas_store.clear()
+    storage = await get_project_storage(path)
+    storage.clear_canvas()
 
     return {"status": "ok"}
 
@@ -706,10 +721,10 @@ async def get_viewport(path: str = Query(..., description="Project path")):
             "selected_node_id": "node_id" | null
         }
     """
-    store = CanvasStore(path)
-    viewport = store.get_viewport()
+    storage = await get_project_storage(path)
+    viewport = storage.get_viewport()
 
-    return viewport.to_dict()
+    return viewport
 
 
 @app.patch("/api/canvas/viewport")
@@ -719,7 +734,7 @@ async def update_viewport(request: ViewportUpdateRequest):
 
     Only update non-None fields
     """
-    store = CanvasStore(request.path)
+    storage = await get_project_storage(request.path)
 
     # Build updates dictionary
     updates = {}
@@ -735,9 +750,10 @@ async def update_viewport(request: ViewportUpdateRequest):
         # Empty string indicates clearing selection
         updates["selected_edge_id"] = request.selected_edge_id if request.selected_edge_id else None
 
-    viewport = store.update_viewport(updates)
+    storage.update_viewport(updates)
+    viewport = storage.get_viewport()
 
-    return {"status": "ok", "viewport": viewport.to_dict()}
+    return {"status": "ok", "viewport": viewport}
 
 
 # ============================================

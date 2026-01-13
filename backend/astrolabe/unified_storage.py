@@ -20,17 +20,32 @@ from typing import Optional
 class UnifiedStorage:
     """Unified Node/Edge storage manager"""
 
-    def __init__(self, graph_data: dict, meta_path: Path):
+    # Default viewport settings
+    DEFAULT_VIEWPORT = {
+        "camera_position": [0, 0, 20],
+        "camera_target": [0, 0, 0],
+        "zoom": 1.0,
+        "selected_node_id": None,
+        "selected_edge_id": None,
+    }
+
+    def __init__(self, graph_data: dict, meta_path: Path, project_path: Path = None):
         """
         Initialize storage manager
 
         Args:
             graph_data: Contents of graph.json (read-only, Lean parsing data)
             meta_path: Path to meta.json (read/write, user data)
+            project_path: Path to project root (for canvas.json migration)
         """
         self._graph_data = graph_data
         self._meta_path = meta_path
+        self._project_path = project_path
         self._meta = self._load_meta()
+
+        # Migrate canvas.json if needed
+        if project_path:
+            self._migrate_canvas_if_needed()
 
         # Build index of Lean nodes/edges for convenient querying
         self._lean_node_ids = {n["id"] for n in graph_data.get("nodes", [])}
@@ -47,8 +62,25 @@ class UnifiedStorage:
     def _load_meta(self) -> dict:
         """Load meta.json"""
         if self._meta_path.exists():
-            return json.loads(self._meta_path.read_text(encoding="utf-8"))
-        return {"nodes": {}, "edges": {}, "macros": {}}
+            data = json.loads(self._meta_path.read_text(encoding="utf-8"))
+            # Ensure canvas structure exists
+            if "canvas" not in data:
+                data["canvas"] = {
+                    "visible_nodes": [],
+                    "positions": {},
+                    "viewport": self.DEFAULT_VIEWPORT.copy(),
+                }
+            return data
+        return {
+            "nodes": {},
+            "edges": {},
+            "macros": {},
+            "canvas": {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            },
+        }
 
     def _save_meta(self):
         """Save meta.json"""
@@ -570,5 +602,324 @@ class UnifiedStorage:
 
         Note: This does not affect graph_data (Lean parsing data)
         """
-        self._meta = {"nodes": {}, "edges": {}, "macros": {}}
+        self._meta = {
+            "nodes": {},
+            "edges": {},
+            "macros": {},
+            "canvas": {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            },
+        }
+        self._save_meta()
+
+    # =========================================
+    # Canvas operations
+    # =========================================
+
+    def _migrate_canvas_if_needed(self):
+        """
+        Migrate old canvas.json to meta.json if needed.
+
+        Migration happens when:
+        1. canvas.json exists
+        2. meta.json doesn't already have canvas data (or canvas is empty)
+        """
+        if not self._project_path:
+            return
+
+        canvas_path = self._project_path / ".astrolabe" / "canvas.json"
+        if not canvas_path.exists():
+            return
+
+        # Check if meta.json already has non-empty canvas data
+        existing_canvas = self._meta.get("canvas", {})
+        if existing_canvas.get("visible_nodes") or existing_canvas.get("positions"):
+            # Already has canvas data, don't overwrite
+            return
+
+        # Read old canvas.json
+        try:
+            canvas_data = json.loads(canvas_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            # Corrupted or unreadable, skip migration
+            return
+
+        # Migrate data
+        self._meta["canvas"] = {
+            "visible_nodes": canvas_data.get("visible_nodes", []),
+            "positions": canvas_data.get("positions", {}),
+            "viewport": canvas_data.get("viewport", self.DEFAULT_VIEWPORT.copy()),
+        }
+
+        # Save migrated data
+        self._save_meta()
+
+    def cleanup_old_canvas(self):
+        """
+        Delete old canvas.json after successful migration.
+
+        Safe to call multiple times - does nothing if file doesn't exist.
+        """
+        if not self._project_path:
+            return
+
+        canvas_path = self._project_path / ".astrolabe" / "canvas.json"
+        if canvas_path.exists():
+            canvas_path.unlink()
+
+    def get_canvas(self) -> dict:
+        """
+        Get full canvas data.
+
+        Returns:
+            Canvas dict with visible_nodes, positions, viewport
+        """
+        canvas = self._meta.get("canvas", {})
+        return {
+            "visible_nodes": canvas.get("visible_nodes", []),
+            "positions": canvas.get("positions", {}),
+            "viewport": canvas.get("viewport", self.DEFAULT_VIEWPORT.copy()),
+        }
+
+    def set_canvas(self, data: dict):
+        """
+        Replace entire canvas data.
+
+        Args:
+            data: New canvas data (visible_nodes, positions, viewport)
+        """
+        self._meta["canvas"] = {
+            "visible_nodes": data.get("visible_nodes", []),
+            "positions": data.get("positions", {}),
+            "viewport": data.get("viewport", self.DEFAULT_VIEWPORT.copy()),
+        }
+        self._save_meta()
+
+    def get_visible_nodes(self) -> list[str]:
+        """
+        Get list of visible node IDs.
+
+        Returns:
+            List of node IDs
+        """
+        return self._meta.get("canvas", {}).get("visible_nodes", [])
+
+    def set_visible_nodes(self, nodes: list[str]):
+        """
+        Set list of visible nodes.
+
+        Args:
+            nodes: List of node IDs
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        self._meta["canvas"]["visible_nodes"] = nodes
+        self._save_meta()
+
+    def add_node_to_canvas(self, node_id: str):
+        """
+        Add a node to the canvas.
+
+        Idempotent - does nothing if node already visible.
+
+        Args:
+            node_id: Node ID to add
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        visible = self._meta["canvas"]["visible_nodes"]
+        if node_id not in visible:
+            visible.append(node_id)
+            self._save_meta()
+
+    def add_nodes_to_canvas(self, node_ids: list[str]):
+        """
+        Add multiple nodes to the canvas.
+
+        Idempotent - skips nodes already visible.
+
+        Args:
+            node_ids: List of node IDs to add
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        visible = self._meta["canvas"]["visible_nodes"]
+        changed = False
+        for node_id in node_ids:
+            if node_id not in visible:
+                visible.append(node_id)
+                changed = True
+        if changed:
+            self._save_meta()
+
+    def remove_node_from_canvas(self, node_id: str):
+        """
+        Remove a node from the canvas.
+
+        Also removes the node's position.
+
+        Args:
+            node_id: Node ID to remove
+        """
+        if "canvas" not in self._meta:
+            return
+
+        visible = self._meta["canvas"].get("visible_nodes", [])
+        if node_id in visible:
+            visible.remove(node_id)
+
+        # Also remove position
+        positions = self._meta["canvas"].get("positions", {})
+        if node_id in positions:
+            del positions[node_id]
+
+        self._save_meta()
+
+    def clear_canvas(self):
+        """
+        Clear canvas (visible_nodes and positions).
+
+        Keeps viewport unchanged.
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        else:
+            self._meta["canvas"]["visible_nodes"] = []
+            self._meta["canvas"]["positions"] = {}
+        self._save_meta()
+
+    def get_positions(self) -> dict[str, dict]:
+        """
+        Get all node positions.
+
+        Returns:
+            Dict of node_id -> {x, y, z}
+        """
+        return self._meta.get("canvas", {}).get("positions", {})
+
+    def set_positions(self, positions: dict[str, dict]):
+        """
+        Replace all positions.
+
+        Args:
+            positions: Dict of node_id -> {x, y, z}
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        self._meta["canvas"]["positions"] = positions
+        self._save_meta()
+
+    def update_positions(self, positions: dict[str, dict]):
+        """
+        Merge new positions with existing ones.
+
+        Args:
+            positions: Dict of node_id -> {x, y, z} to merge
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        existing = self._meta["canvas"].get("positions", {})
+        existing.update(positions)
+        self._meta["canvas"]["positions"] = existing
+        self._save_meta()
+
+    def delete_position(self, node_id: str):
+        """
+        Delete a single node's position.
+
+        Args:
+            node_id: Node ID
+        """
+        positions = self._meta.get("canvas", {}).get("positions", {})
+        if node_id in positions:
+            del positions[node_id]
+            self._save_meta()
+
+    def get_node_position(self, node_id: str) -> Optional[dict]:
+        """
+        Get position for a single node.
+
+        Args:
+            node_id: Node ID
+
+        Returns:
+            Position dict {x, y, z} or None if not found
+        """
+        return self._meta.get("canvas", {}).get("positions", {}).get(node_id)
+
+    def get_viewport(self) -> dict:
+        """
+        Get viewport data.
+
+        Returns:
+            Viewport dict with camera_position, camera_target, zoom, etc.
+        """
+        viewport = self._meta.get("canvas", {}).get("viewport", {})
+        # Merge with defaults to ensure all fields exist
+        result = self.DEFAULT_VIEWPORT.copy()
+        result.update(viewport)
+        return result
+
+    def set_viewport(self, viewport: dict):
+        """
+        Replace viewport data.
+
+        Args:
+            viewport: New viewport data
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        self._meta["canvas"]["viewport"] = viewport
+        self._save_meta()
+
+    def update_viewport(self, partial: dict):
+        """
+        Partially update viewport (merge fields).
+
+        Args:
+            partial: Fields to update (None values are allowed to clear fields)
+        """
+        if "canvas" not in self._meta:
+            self._meta["canvas"] = {
+                "visible_nodes": [],
+                "positions": {},
+                "viewport": self.DEFAULT_VIEWPORT.copy(),
+            }
+        if "viewport" not in self._meta["canvas"]:
+            self._meta["canvas"]["viewport"] = self.DEFAULT_VIEWPORT.copy()
+
+        for key, value in partial.items():
+            # Allow None values to clear fields like selected_node_id
+            self._meta["canvas"]["viewport"][key] = value
+
         self._save_meta()
