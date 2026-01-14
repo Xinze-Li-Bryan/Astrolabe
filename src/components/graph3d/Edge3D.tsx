@@ -265,6 +265,7 @@ export const Edge3D = memo(function Edge3D({
             end={currentEndRef.current}
             color={color}
             width={width}
+            controlPoint={midPointRef.current}
           />
         )}
       </>

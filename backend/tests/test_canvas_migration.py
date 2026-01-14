@@ -350,11 +350,11 @@ class TestMigrationCleanup:
         # Verify canvas.json is deleted
         assert not canvas_path.exists()
 
-        # Verify data is in meta.json
+        # Verify data is in meta.json (visible is now in nodes.<id>.visible)
         with open(meta_path, "r") as f:
             data = json.load(f)
-        assert "canvas" in data
-        assert data["canvas"]["visible_nodes"] == ["Module.theorem1"]
+        assert "nodes" in data
+        assert data["nodes"]["Module.theorem1"]["visible"] is True
 
     def test_no_delete_if_migration_failed(self, temp_project, meta_path, canvas_path):
         """Don't delete canvas.json if migration somehow fails"""

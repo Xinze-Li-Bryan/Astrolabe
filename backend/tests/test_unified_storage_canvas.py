@@ -97,13 +97,15 @@ class TestCanvasBasicOperations:
 
     def test_get_canvas_with_data(self, storage, meta_path):
         """Get canvas when canvas data exists in meta.json"""
-        # Pre-populate meta.json with canvas data
+        # Pre-populate meta.json with canvas data (new format: visible in nodes)
         initial_meta = {
-            "nodes": {},
+            "nodes": {
+                "Module.theorem1": {"visible": True},
+                "Module.theorem2": {"visible": True},
+            },
             "edges": {},
             "macros": {},
             "canvas": {
-                "visible_nodes": ["Module.theorem1", "Module.theorem2"],
                 "positions": {
                     "Module.theorem1": {"x": 1.0, "y": 2.0, "z": 3.0}
                 },
@@ -121,7 +123,7 @@ class TestCanvasBasicOperations:
         storage = UnifiedStorage(graph_data=MOCK_GRAPH_DATA, meta_path=meta_path)
         canvas = storage.get_canvas()
 
-        assert canvas["visible_nodes"] == ["Module.theorem1", "Module.theorem2"]
+        assert set(canvas["visible_nodes"]) == {"Module.theorem1", "Module.theorem2"}
         assert canvas["positions"]["Module.theorem1"] == {"x": 1.0, "y": 2.0, "z": 3.0}
         assert canvas["viewport"]["camera_position"] == [10, 10, 30]
 
@@ -132,12 +134,13 @@ class TestCanvasBasicOperations:
 
         # Verify in memory
         canvas = storage.get_canvas()
-        assert canvas["visible_nodes"] == nodes
+        assert set(canvas["visible_nodes"]) == set(nodes)
 
-        # Verify persisted to file
+        # Verify persisted to file (visible is now in nodes.<id>.visible)
         with open(meta_path, "r") as f:
             data = json.load(f)
-        assert data["canvas"]["visible_nodes"] == nodes
+        assert data["nodes"]["Module.theorem1"]["visible"] is True
+        assert data["nodes"]["Module.lemma1"]["visible"] is True
 
     def test_add_node_to_canvas(self, storage, meta_path):
         """Add a single node to canvas"""
@@ -387,13 +390,14 @@ class TestCanvasCoexistsWithMeta:
         canvas = storage.get_canvas()
         assert "Module.theorem1" in canvas["visible_nodes"]
 
-        # Verify file structure
+        # Verify file structure (visible is now in nodes.<id>.visible)
         with open(meta_path, "r") as f:
             data = json.load(f)
         assert "nodes" in data
         assert "canvas" in data
         assert data["nodes"]["Module.theorem1"]["notes"] == "# My notes"
-        assert data["canvas"]["visible_nodes"] == ["Module.theorem1", "Module.theorem2"]
+        assert data["nodes"]["Module.theorem1"]["visible"] is True
+        assert data["nodes"]["Module.theorem2"]["visible"] is True
 
     def test_canvas_coexists_with_edge_meta(self, storage, meta_path):
         """Canvas operations should not affect edge meta"""
@@ -490,12 +494,12 @@ class TestCanvasPersistence:
         storage2 = UnifiedStorage(graph_data=MOCK_GRAPH_DATA, meta_path=meta_path)
         canvas = storage2.get_canvas()
 
-        assert canvas["visible_nodes"] == ["Module.theorem1", "Module.theorem2"]
+        assert set(canvas["visible_nodes"]) == {"Module.theorem1", "Module.theorem2"}
         assert canvas["positions"]["Module.theorem1"] == {"x": 1, "y": 2, "z": 3}
         assert canvas["viewport"]["camera_position"] == [10, 20, 30]
 
     def test_canvas_file_format(self, storage, meta_path):
-        """Verify canvas is stored in correct JSON format"""
+        """Verify canvas is stored in correct JSON format (visible in nodes)"""
         storage.set_visible_nodes(["Module.theorem1"])
         storage.set_positions({"Module.theorem1": {"x": 1.5, "y": 2.5, "z": 3.5}})
         storage.set_viewport({
@@ -508,8 +512,11 @@ class TestCanvasPersistence:
         with open(meta_path, "r") as f:
             data = json.load(f)
 
+        # visible is now in nodes.<id>.visible
+        assert "nodes" in data
+        assert data["nodes"]["Module.theorem1"]["visible"] is True
+        # positions and viewport are in canvas
         assert "canvas" in data
-        assert data["canvas"]["visible_nodes"] == ["Module.theorem1"]
         assert data["canvas"]["positions"]["Module.theorem1"]["x"] == 1.5
         assert data["canvas"]["viewport"]["camera_position"] == [10, 20, 30]
         assert data["canvas"]["viewport"]["selected_node_id"] == "Module.theorem1"

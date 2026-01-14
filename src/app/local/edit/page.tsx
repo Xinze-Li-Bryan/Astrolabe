@@ -24,6 +24,7 @@ import {
     ArrowsPointingOutIcon,
     TrashIcon,
     DocumentTextIcon,
+    BoltIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
 import { UIColors } from '@/lib/colors'
@@ -116,6 +117,7 @@ function LocalEditorContent() {
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
     const [showLabels, setShowLabels] = useState(true) // Whether to show node labels
+    const [showShortcutEdges, setShowShortcutEdges] = useState(false) // Whether to show shortcut edges
 
     // Physics settings for 3D force graph
     const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
@@ -297,16 +299,23 @@ function LocalEditorContent() {
         }
 
         try {
-            const edge = await addCustomEdge(source, target)
-            if (edge) {
-                console.log('[page] Created custom edge:', edge)
+            // Pass all Lean edges to check for cycles
+            const leanEdges = astrolabeEdges.map(e => ({ source: e.source, target: e.target }))
+            const result = await addCustomEdge(source, target, leanEdges)
+
+            if (result.error) {
+                // Show error alert for cycle detection
+                alert(result.error)
+                console.warn('[page] Edge creation blocked:', result.error)
+            } else if (result.edge) {
+                console.log('[page] Created custom edge:', result.edge)
             }
         } catch (err) {
             console.error('[page] Failed to create custom edge:', err)
         }
 
         setIsAddingEdge(false)
-    }, [selectedNode, isAddingEdge, addingEdgeDirection, addCustomEdge])
+    }, [selectedNode, isAddingEdge, addingEdgeDirection, addCustomEdge, astrolabeEdges])
 
     // Cancel adding edge mode
     const cancelAddingEdge = useCallback(() => {
@@ -1273,6 +1282,17 @@ function LocalEditorContent() {
                                     title={showLabels ? 'Hide Labels' : 'Show Labels'}
                                 >
                                     <TagIcon className="w-4 h-4" />
+                                </button>
+
+                                {/* Shortcut edges toggle */}
+                                <button
+                                    onClick={() => setShowShortcutEdges(!showShortcutEdges)}
+                                    className={`p-1.5 rounded transition-colors ${
+                                        showShortcutEdges ? 'bg-yellow-500/30 text-yellow-400' : 'bg-black/60 text-white/40 hover:text-white'
+                                    }`}
+                                    title={showShortcutEdges ? 'Hide Shortcut Edges' : 'Show Shortcut Edges'}
+                                >
+                                    <BoltIcon className="w-4 h-4" />
                                 </button>
 
                                 {/* Add custom node button */}
