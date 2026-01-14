@@ -162,7 +162,7 @@ class Project:
             "edges": [{"source": e.source, "target": e.target} for e in self.edges],
         }
         meta_path = self.project_path / ".astrolabe" / "meta.json"
-        self.storage = UnifiedStorage(graph_data, meta_path)
+        self.storage = UnifiedStorage(graph_data, meta_path, project_path=self.project_path)
 
         # 8. Merge meta to nodes (using storage)
         from .models.node import NodeMeta
@@ -311,7 +311,7 @@ class Project:
             "edges": [{"source": e.source, "target": e.target} for e in self.edges],
         }
         meta_path = self.project_path / ".astrolabe" / "meta.json"
-        self.storage = UnifiedStorage(graph_data, meta_path)
+        self.storage = UnifiedStorage(graph_data, meta_path, project_path=self.project_path)
 
         # Update node meta (using storage)
         from .models.node import NodeMeta
