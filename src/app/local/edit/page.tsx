@@ -24,7 +24,6 @@ import {
     ArrowsPointingOutIcon,
     TrashIcon,
     DocumentTextIcon,
-    BoltIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
 import { UIColors } from '@/lib/colors'
@@ -117,7 +116,6 @@ function LocalEditorContent() {
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
     const [showLabels, setShowLabels] = useState(true) // Whether to show node labels
-    const [showShortcutEdges, setShowShortcutEdges] = useState(false) // Whether to show shortcut edges
 
     // Physics settings for 3D force graph
     const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
@@ -1275,17 +1273,6 @@ function LocalEditorContent() {
                                     title={showLabels ? 'Hide Labels' : 'Show Labels'}
                                 >
                                     <TagIcon className="w-4 h-4" />
-                                </button>
-
-                                {/* Shortcut edges toggle */}
-                                <button
-                                    onClick={() => setShowShortcutEdges(!showShortcutEdges)}
-                                    className={`p-1.5 rounded transition-colors ${
-                                        showShortcutEdges ? 'bg-yellow-500/30 text-yellow-400' : 'bg-black/60 text-white/40 hover:text-white'
-                                    }`}
-                                    title={showShortcutEdges ? 'Hide Shortcut Edges' : 'Show Shortcut Edges'}
-                                >
-                                    <BoltIcon className="w-4 h-4" />
                                 </button>
 
                                 {/* Add custom node button */}
