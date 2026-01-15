@@ -9,14 +9,12 @@ class TestNodeMeta:
     def test_meta_with_values(self):
         meta = NodeMeta(
             label="Main Theorem",
-            color="#f1c40f",
             size=12.0,
             notes="Important result",
             tags=["main", "number-theory"],
         )
         d = meta.to_dict()
         assert d["label"] == "Main Theorem"
-        assert d["color"] == "#f1c40f"
         assert d["size"] == 12.0
         assert d["notes"] == "Important result"
         assert d["tags"] == ["main", "number-theory"]
@@ -30,13 +28,13 @@ class TestNodeMeta:
     def test_meta_from_dict(self):
         data = {
             "label": "Test",
-            "color": "#fff",
+            "size": 2.0,
             "pinned": True,
             "notes": "Important note",
         }
         meta = NodeMeta.from_dict(data)
         assert meta.label == "Test"
-        assert meta.color == "#fff"
+        assert meta.size == 2.0
         assert meta.pinned is True
         assert meta.notes == "Important note"
 
@@ -73,10 +71,10 @@ class TestNode:
         assert node.id == "MyModule.myTheorem"
         assert node.status == ProofStatus.UNKNOWN
         assert node.meta.label is None
-        assert node.meta.color is None
+        assert node.meta.size is None
 
     def test_node_with_meta(self):
-        meta = NodeMeta(color="#f1c40f", notes="Important")
+        meta = NodeMeta(size=2.0, notes="Important")
         node = Node(
             id="Test.theorem1",
             name="theorem1",
@@ -85,11 +83,11 @@ class TestNode:
             line_number=5,
             meta=meta,
         )
-        assert node.meta.color == "#f1c40f"
+        assert node.meta.size == 2.0
         assert node.meta.notes == "Important"
 
     def test_node_to_dict(self):
-        meta = NodeMeta(label="Theorem 1", color="#f1c40f")
+        meta = NodeMeta(label="Theorem 1", size=2.0)
         node = Node(
             id="Test.lemma1",
             name="lemma1",
@@ -106,7 +104,7 @@ class TestNode:
         assert d["references"] == ["Test.helper"]
         assert d["filePath"] == "Test.lean"
         assert d["meta"]["label"] == "Theorem 1"
-        assert d["meta"]["color"] == "#f1c40f"
+        assert d["meta"]["size"] == 2.0
 
 
 class TestEdge:

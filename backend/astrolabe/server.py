@@ -158,13 +158,6 @@ class ViewportUpdateRequest(BaseModel):
     selected_edge_id: Optional[str] = None
 
 
-class MacrosUpdateRequest(BaseModel):
-    """LaTeX macros update request"""
-
-    path: str
-    macros: dict[str, str]  # { "\\RR": "\\mathbb{R}", ... }
-
-
 class UserNodeRequest(BaseModel):
     """Add User node request"""
 
@@ -662,7 +655,7 @@ async def clear_canvas(path: str = Query(..., description="Project path")):
 @app.post("/api/meta/clear")
 async def clear_meta(path: str = Query(..., description="Project path")):
     """
-    Clear all metadata (node meta, edge meta, macros).
+    Clear all metadata (node meta, edge meta, canvas).
     This is a destructive operation.
     """
     if path not in _projects:
@@ -759,45 +752,6 @@ async def update_viewport(request: ViewportUpdateRequest):
 # ============================================
 # Macros API
 # ============================================
-
-
-@app.get("/api/project/macros")
-async def get_macros(path: str = Query(..., description="Project path")):
-    """
-    Get project's custom LaTeX macros
-
-    Returns:
-        { "macros": { "\\RR": "\\mathbb{R}", ... } }
-    """
-    if path not in _projects:
-        project = get_project(path)
-        await project.load()
-    else:
-        project = _projects[path]
-
-    return {"macros": project.get_macros()}
-
-
-@app.put("/api/project/macros")
-async def update_macros(request: MacrosUpdateRequest):
-    """
-    Update project's custom LaTeX macros (full replacement)
-
-    Request body:
-        {
-            "path": "/path/to/project",
-            "macros": { "\\RR": "\\mathbb{R}", ... }
-        }
-    """
-    if request.path not in _projects:
-        project = get_project(request.path)
-        await project.load()
-    else:
-        project = _projects[request.path]
-
-    project.set_macros(request.macros)
-
-    return {"status": "ok", "macros": project.get_macros()}
 
 
 # ============================================

@@ -81,7 +81,6 @@ export interface CustomNode {
   notes?: string
   effect?: string
   size?: number
-  color?: string
 }
 
 // Custom edge type
@@ -92,8 +91,6 @@ export interface CustomEdge {
   notes?: string
   style?: string
   effect?: string
-  width?: number
-  color?: string
 }
 
 // 3D position type
@@ -458,7 +455,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         notes: data.node.notes,
         effect: data.node.effect,
         size: data.node.size,
-        color: data.node.color,
       }
       set({ customNodes: [...customNodes, newNode] })
 
@@ -496,7 +492,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
               notes: data.node?.notes ?? node.notes,
               effect: data.node?.effect ?? node.effect,
               size: data.node?.size ?? node.size,
-              color: data.node?.color ?? node.color,
             }
           : node
       )
@@ -570,8 +565,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         notes: data.edge.notes,
         style: data.edge.style,
         effect: data.edge.effect,
-        width: data.edge.width,
-        color: data.edge.color,
       }
       set({ customEdges: [...customEdges, newEdge] })
       console.log('[CanvasStore] Added custom edge:', newEdge.id)

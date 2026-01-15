@@ -61,7 +61,7 @@ export interface AstrolabeNode {
   defaultShape: string
 
   // Visual style overrides (from meta.json user edit)
-  color?: string
+  // Note: color removed - always use defaultColor based on kind
   size?: number
   shape?: string
   effect?: string
@@ -91,8 +91,7 @@ export interface AstrolabeEdge {
   defaultStyle: string  // 'solid' | 'dashed' | 'polyline'
 
   // Visual style overrides (from meta.json user edit)
-  color?: string
-  width?: number
+  // Note: color and width removed - always use defaults based on fromLean
   style?: string
   effect?: string
   notes?: string
@@ -146,8 +145,7 @@ export function toAstrolabeNode(old: GraphNode): AstrolabeNode {
     defaultColor: old.customColor ?? '#888888',
     defaultSize: old.customSize ?? 1.0,
     defaultShape: 'sphere',
-    // User overrides
-    color: old.customColor,
+    // User overrides (color removed)
     size: old.customSize,
     position: (old.x !== undefined && old.y !== undefined && old.z !== undefined)
       ? { x: old.x, y: old.y, z: old.z }
@@ -169,7 +167,7 @@ export function toGraphNode(node: AstrolabeNode): GraphNode {
     leanFilePath: node.leanFile?.path,
     leanLineNumber: node.leanFile?.line,
     notes: node.notes,
-    customColor: node.color,
+    customColor: node.defaultColor,  // Use default color
     customSize: node.size,
     x: node.position?.x,
     y: node.position?.y,

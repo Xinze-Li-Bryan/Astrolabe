@@ -207,13 +207,13 @@ class TestMigrationEdgeCases:
 
     def test_migrate_already_migrated(self, temp_project, meta_path, canvas_path):
         """Migration when meta.json already has canvas data"""
-        # Create meta.json with existing canvas
+        # Create meta.json with existing canvas (new format: visible in nodes)
         meta_path.write_text(json.dumps({
-            "nodes": {},
+            "nodes": {
+                "Module.theorem1": {"visible": True}
+            },
             "edges": {},
-            "macros": {},
             "canvas": {
-                "visible_nodes": ["Module.theorem1"],
                 "positions": {"Module.theorem1": {"x": 100, "y": 200, "z": 300}},
                 "viewport": {"camera_position": [1, 1, 1]}
             }
@@ -245,16 +245,13 @@ class TestMigrationEdgeCases:
             "nodes": {
                 "Module.theorem1": {
                     "notes": "# Important theorem",
-                    "color": "#ff0000"
+                    "size": 2.0
                 }
             },
             "edges": {
                 "Module.theorem1->Module.theorem2": {
-                    "color": "#00ff00"
+                    "style": "dashed"
                 }
-            },
-            "macros": {
-                "\\R": "\\mathbb{R}"
             }
         }))
 
@@ -275,13 +272,10 @@ class TestMigrationEdgeCases:
         # Verify original meta preserved
         node_meta = storage.get_node_meta("Module.theorem1")
         assert node_meta["notes"] == "# Important theorem"
-        assert node_meta["color"] == "#ff0000"
+        assert node_meta["size"] == 2.0
 
         edge_meta = storage.get_edge_meta("Module.theorem1->Module.theorem2")
-        assert edge_meta["color"] == "#00ff00"
-
-        macros = storage.get_macros()
-        assert macros["\\R"] == "\\mathbb{R}"
+        assert edge_meta["style"] == "dashed"
 
         # Verify canvas was migrated
         canvas = storage.get_canvas()

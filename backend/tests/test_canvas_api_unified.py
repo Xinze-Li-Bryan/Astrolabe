@@ -425,18 +425,17 @@ class TestAPIPreservesOtherMeta:
     """Test that canvas API operations preserve other meta data"""
 
     def test_canvas_api_preserves_node_meta(self, temp_project, project_path):
-        """Canvas operations should not affect node notes/colors"""
+        """Canvas operations should not affect node notes/size"""
         meta_path = temp_project / ".astrolabe" / "meta.json"
         meta_path.write_text(json.dumps({
             "nodes": {
                 "Module.theorem1": {
                     "notes": "# Important",
-                    "color": "#ff0000"
+                    "size": 2.0
                 }
             },
             "edges": {},
             "canvas": {
-                "visible_nodes": [],
                 "positions": {},
                 "viewport": {}
             }
@@ -461,4 +460,4 @@ class TestAPIPreservesOtherMeta:
             data = json.load(f)
 
         assert data["nodes"]["Module.theorem1"]["notes"] == "# Important"
-        assert data["nodes"]["Module.theorem1"]["color"] == "#ff0000"
+        assert data["nodes"]["Module.theorem1"]["size"] == 2.0

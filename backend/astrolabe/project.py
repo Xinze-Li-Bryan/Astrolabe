@@ -331,17 +331,6 @@ class Project:
             else:
                 edge.meta = EdgeMeta()
 
-    def get_macros(self) -> dict[str, str]:
-        """Get custom LaTeX macros"""
-        if self.storage:
-            return self.storage.get_macros()
-        return {}
-
-    def set_macros(self, macros: dict[str, str]):
-        """Set custom LaTeX macros"""
-        if self.storage:
-            self.storage.set_macros(macros)
-
     def update_node_meta(self, node_id: str, updates: dict):
         """
         Update node meta (for API calls)
@@ -452,5 +441,4 @@ class Project:
             "nodes": nodes_json,
             "edges": [e.to_dict() for e in self.edges],
             "stats": self.get_stats(),
-            "macros": self.get_macros(),
         }

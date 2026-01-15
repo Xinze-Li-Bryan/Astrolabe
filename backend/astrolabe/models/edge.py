@@ -8,8 +8,6 @@ class EdgeMeta:
     User-editable edge properties via UI, stored in edges namespace of .astrolabe/meta.json
     """
 
-    width: Optional[float] = None
-    color: Optional[str] = None
     style: Optional[str] = None  # solid, dashed, dotted, wavy
     effect: Optional[str] = None
     notes: Optional[str] = None
@@ -17,10 +15,6 @@ class EdgeMeta:
     def to_dict(self) -> dict:
         """Output only non-empty fields"""
         result = {}
-        if self.width is not None:
-            result["width"] = self.width
-        if self.color:
-            result["color"] = self.color
         if self.style:
             result["style"] = self.style
         if self.effect:
@@ -31,10 +25,8 @@ class EdgeMeta:
 
     @classmethod
     def from_dict(cls, data: dict) -> "EdgeMeta":
-        """Create EdgeMeta from dict"""
+        """Create EdgeMeta from dict (ignores old color/width fields for backward compatibility)"""
         return cls(
-            width=data.get("width"),
-            color=data.get("color"),
             style=data.get("style"),
             effect=data.get("effect"),
             notes=data.get("notes"),

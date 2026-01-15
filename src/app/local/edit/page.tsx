@@ -235,7 +235,6 @@ function LocalEditorContent() {
         sourceName: string
         targetName: string
         notes?: string
-        width?: number
         style?: string
         effect?: string
         defaultStyle: string  // Default style for this edge
@@ -430,13 +429,12 @@ function LocalEditorContent() {
     }, [projectPath, reloadMeta, loadCanvas])
 
     // Handle edge style change from EdgeStylePanel
-    const handleEdgeStyleChange = useCallback(async (edgeId: string, style: { effect?: string; width?: number; style?: string }) => {
+    const handleEdgeStyleChange = useCallback(async (edgeId: string, style: { effect?: string; style?: string }) => {
         console.log('[handleEdgeStyleChange]', { edgeId, style })
         if (!projectPath) return
         try {
             // Call backend API to save edge meta
             await updateEdgeMeta(projectPath, edgeId, {
-                width: style.width,
                 effect: style.effect,
                 style: style.style,
             })
@@ -596,7 +594,6 @@ function LocalEditorContent() {
                         notes: edgeData?.notes || customEdge?.notes,
                         style: edgeData?.style || customEdge?.style,
                         effect: edgeData?.effect || customEdge?.effect,
-                        width: edgeData?.width || customEdge?.width,
                         defaultStyle: edgeData?.defaultStyle || 'solid',
                     })
                     // Trigger focus on edge
@@ -702,7 +699,6 @@ function LocalEditorContent() {
                 // User override styles - from meta.json
                 meta: {
                     size: node.size,
-                    color: node.color,
                     shape: node.shape,
                     effect: node.effect,
                     // Position information - used for direct positioning during initialization, avoiding physics simulation "pulling"
@@ -726,10 +722,8 @@ function LocalEditorContent() {
                 defaultColor: edge.defaultColor,
                 defaultWidth: edge.defaultWidth,
                 defaultStyle: edge.defaultStyle,
-                // User override styles - from meta.json
+                // User override styles - from meta.json (color and width removed)
                 meta: {
-                    color: edge.color,
-                    width: edge.width,
                     style: edge.style,
                     effect: edge.effect,
                 },
@@ -961,7 +955,6 @@ function LocalEditorContent() {
                 target: edge.target,
                 sourceName: sourceNode?.name || edge.source,
                 targetName: targetNode?.name || edge.target,
-                width: edgeData?.width ?? customEdge?.width,
                 style: edgeData?.style ?? customEdge?.style,
                 effect: edgeData?.effect ?? customEdge?.effect,
                 defaultStyle: edgeData?.defaultStyle ?? (customEdge ? 'dashed' : 'solid'),
@@ -1786,7 +1779,6 @@ function LocalEditorContent() {
                                                                                             target: edge.target,
                                                                                             sourceName: direction === 'in' ? nodeName : selectedNode.name,
                                                                                             targetName: direction === 'in' ? selectedNode.name : nodeName,
-                                                                                            width: edgeData?.width,
                                                                                             style: edgeData?.style,
                                                                                             effect: edgeData?.effect,
                                                                                             defaultStyle: isCustom ? 'dashed' : (edgeData?.defaultStyle ?? 'solid'),
@@ -1878,7 +1870,6 @@ function LocalEditorContent() {
                                                                             edgeId={selectedEdge.id}
                                                                             sourceNode={selectedEdge.sourceName}
                                                                             targetNode={selectedEdge.targetName}
-                                                                            initialWidth={selectedEdge.width ?? 1.0}
                                                                             initialStyle={selectedEdge.style ?? selectedEdge.defaultStyle}
                                                                             initialEffect={selectedEdge.effect}
                                                                             defaultStyle={selectedEdge.defaultStyle}

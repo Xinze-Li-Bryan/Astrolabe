@@ -7,11 +7,12 @@ the canvas methods are added to UnifiedStorage.
 
 Canvas data structure in meta.json:
 {
-  "nodes": {...},
+  "nodes": {
+    "node1": {"visible": true, ...},
+    "node2": {"visible": true, ...}
+  },
   "edges": {...},
-  "macros": {...},
   "canvas": {
-    "visible_nodes": ["node1", "node2"],
     "positions": {"node1": {"x": 1.0, "y": 2.0, "z": 3.0}},
     "viewport": {
       "camera_position": [0, 0, 20],
@@ -104,7 +105,6 @@ class TestCanvasBasicOperations:
                 "Module.theorem2": {"visible": True},
             },
             "edges": {},
-            "macros": {},
             "canvas": {
                 "positions": {
                     "Module.theorem1": {"x": 1.0, "y": 2.0, "z": 3.0}
@@ -373,9 +373,9 @@ class TestCanvasCoexistsWithMeta:
     """Test that canvas data coexists properly with other meta data"""
 
     def test_canvas_coexists_with_node_meta(self, storage, meta_path):
-        """Canvas operations should not affect node meta (notes, colors)"""
+        """Canvas operations should not affect node meta (notes, size)"""
         # Set up node meta
-        storage.update_node_meta("Module.theorem1", notes="# My notes", color="#ff0000")
+        storage.update_node_meta("Module.theorem1", notes="# My notes", size=2.0)
 
         # Set up canvas
         storage.set_visible_nodes(["Module.theorem1", "Module.theorem2"])
@@ -384,7 +384,7 @@ class TestCanvasCoexistsWithMeta:
         # Verify node meta still exists
         node_meta = storage.get_node_meta("Module.theorem1")
         assert node_meta["notes"] == "# My notes"
-        assert node_meta["color"] == "#ff0000"
+        assert node_meta["size"] == 2.0
 
         # Verify canvas exists
         canvas = storage.get_canvas()
@@ -403,15 +403,15 @@ class TestCanvasCoexistsWithMeta:
         """Canvas operations should not affect edge meta"""
         # Set up edge meta
         edge_id = "Module.theorem1->Module.lemma1"
-        storage.update_edge_meta(edge_id, color="#00ff00", width=2.0)
+        storage.update_edge_meta(edge_id, style="dashed", notes="Test")
 
         # Set up canvas
         storage.set_visible_nodes(["Module.theorem1", "Module.lemma1"])
 
         # Verify edge meta still exists
         edge_meta = storage.get_edge_meta(edge_id)
-        assert edge_meta["color"] == "#00ff00"
-        assert edge_meta["width"] == 2.0
+        assert edge_meta["style"] == "dashed"
+        assert edge_meta["notes"] == "Test"
 
         # Verify canvas exists
         canvas = storage.get_canvas()
@@ -440,28 +440,11 @@ class TestCanvasCoexistsWithMeta:
         assert "custom-123" in canvas["visible_nodes"]
         assert "Module.theorem1" in canvas["visible_nodes"]
 
-    def test_canvas_coexists_with_macros(self, storage, meta_path):
-        """Canvas operations should not affect macros"""
-        # Set up macros
-        storage.set_macros({"\\R": "\\mathbb{R}"})
-
-        # Set up canvas
-        storage.set_visible_nodes(["Module.theorem1"])
-
-        # Verify macros still exist
-        macros = storage.get_macros()
-        assert macros["\\R"] == "\\mathbb{R}"
-
-        # Verify canvas exists
-        canvas = storage.get_canvas()
-        assert "Module.theorem1" in canvas["visible_nodes"]
-
     def test_clear_canvas_preserves_other_meta(self, storage, meta_path):
         """Clearing canvas should not affect other meta data"""
         # Set up various meta data
         storage.update_node_meta("Module.theorem1", notes="# Notes")
         storage.add_user_node("custom-1", "Custom", "custom")
-        storage.set_macros({"\\N": "\\mathbb{N}"})
 
         # Set up and then clear canvas
         storage.set_visible_nodes(["Module.theorem1", "custom-1"])
@@ -471,7 +454,6 @@ class TestCanvasCoexistsWithMeta:
         # Verify other meta preserved
         assert storage.get_node_meta("Module.theorem1")["notes"] == "# Notes"
         assert len(storage.get_all_user_nodes()) == 1
-        assert storage.get_macros()["\\N"] == "\\mathbb{N}"
 
         # Verify canvas cleared
         canvas = storage.get_canvas()

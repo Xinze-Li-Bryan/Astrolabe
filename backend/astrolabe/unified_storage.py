@@ -82,7 +82,6 @@ class UnifiedStorage:
         return {
             "nodes": {},
             "edges": {},
-            "macros": {},
             "canvas": {
                 "positions": {},
                 "viewport": self.DEFAULT_VIEWPORT.copy(),
@@ -560,59 +559,15 @@ class UnifiedStorage:
         """Check if it's a Lean edge (exists in graph_data)"""
         return edge_id in self._lean_edge_ids
 
-    # =========================================
-    # Macros operations
-    # =========================================
-
-    def get_macros(self) -> dict[str, str]:
-        """
-        Get all macros
-
-        Returns:
-            Macros dictionary {name: definition}
-        """
-        return self._meta.get("macros", {}).copy()
-
-    def set_macros(self, macros: dict[str, str]):
-        """
-        Set all macros (complete replacement)
-
-        Args:
-            macros: New macros dictionary
-        """
-        self._meta["macros"] = macros.copy()
-        self._save_meta()
-
-    def update_macros(self, updates: dict[str, str | None]):
-        """
-        Incrementally update macros
-
-        Args:
-            updates: Macros to update, None value indicates deletion
-        """
-        if "macros" not in self._meta:
-            self._meta["macros"] = {}
-
-        for key, value in updates.items():
-            if value is None:
-                # Delete
-                self._meta["macros"].pop(key, None)
-            else:
-                # Update or add
-                self._meta["macros"][key] = value
-
-        self._save_meta()
-
     def clear(self):
         """
-        Clear all meta data (nodes, edges, macros)
+        Clear all meta data (nodes, edges, canvas)
 
         Note: This does not affect graph_data (Lean parsing data)
         """
         self._meta = {
             "nodes": {},
             "edges": {},
-            "macros": {},
             "canvas": {
                 "positions": {},
                 "viewport": self.DEFAULT_VIEWPORT.copy(),

@@ -95,7 +95,7 @@ export const Edge3D = memo(function Edge3D({
   const effectId = edge.meta?.effect
   const EffectComponent = useMemo(() => getEdgeEffect(effectId), [effectId])
 
-  // Edge color: highlight > dimmed > user custom > node status color > default gray
+  // Edge color: highlight > dimmed > node status color > default gray
   const color = useMemo(() => {
     if (isHighlighted) {
       if (highlightType === 'selected') return HIGHLIGHT_COLORS.selected
@@ -103,9 +103,6 @@ export const Edge3D = memo(function Edge3D({
       if (highlightType === 'output') return HIGHLIGHT_COLORS.output
     }
     if (isDimmed) return '#333333'
-
-    // 用户自定义颜色优先
-    if (edge.meta?.color) return edge.meta.color
 
     // 根据节点状态计算颜色（仅 fromLean 边）
     if (nodeStatusMap) {
@@ -116,14 +113,14 @@ export const Edge3D = memo(function Edge3D({
     }
 
     return DEFAULT_EDGE_COLOR
-  }, [isHighlighted, highlightType, isDimmed, edge.meta?.color, edge.source, edge.target, edge.fromLean, nodeStatusMap])
+  }, [isHighlighted, highlightType, isDimmed, edge.source, edge.target, edge.fromLean, nodeStatusMap])
 
-  // 宽度
+  // 宽度 (always use default, no user override)
   const width = useMemo(() => {
     if (highlightType === 'selected') return 4
     if (isHighlighted) return 3
-    return edge.meta?.width ?? edge.defaultWidth
-  }, [isHighlighted, highlightType, edge.meta?.width, edge.defaultWidth])
+    return edge.defaultWidth
+  }, [isHighlighted, highlightType, edge.defaultWidth])
 
   // Get initial positions
   const startPos = positionsRef.current.get(edge.source) || [0, 0, 0]

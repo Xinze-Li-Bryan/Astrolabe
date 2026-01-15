@@ -99,8 +99,7 @@ def storage_with_user_data(meta_path):
                 "notes": "existing"
             }
         },
-        "edges": {},
-        "macros": {}
+        "edges": {}
     }
     with open(meta_path, "w") as f:
         json.dump(initial_meta, f)
@@ -172,7 +171,6 @@ class TestNodeOperations:
 
         storage.update_node_meta(
             node_id,
-            color="#ff0000",
             size=2.0,
             notes="Important theorem",
             pinned=True,
@@ -182,7 +180,6 @@ class TestNodeOperations:
             data = json.load(f)
 
         assert node_id in data["nodes"]
-        assert data["nodes"][node_id]["color"] == "#ff0000"
         assert data["nodes"][node_id]["size"] == 2.0
         assert data["nodes"][node_id]["notes"] == "Important theorem"
         assert data["nodes"][node_id]["pinned"] == True
@@ -197,7 +194,7 @@ class TestNodeOperations:
             name="hacked_name",  # Should not save
             kind="hacked_kind",  # Should not save
             file_path="hacked",  # Should not save
-            color="#ff0000",     # Should save
+            size=2.0,            # Should save
         )
 
         with open(meta_path, "r") as f:
@@ -206,7 +203,7 @@ class TestNodeOperations:
         assert "name" not in data["nodes"][node_id]
         assert "kind" not in data["nodes"][node_id]
         assert "file_path" not in data["nodes"][node_id]
-        assert data["nodes"][node_id]["color"] == "#ff0000"
+        assert data["nodes"][node_id]["size"] == 2.0
 
     def test_update_user_node_meta(self, storage_with_user_data, meta_path):
         """Update User node meta (including name)"""
@@ -216,7 +213,7 @@ class TestNodeOperations:
             node_id,
             name="Updated Name",
             notes="Updated notes",
-            color="#00ff00",
+            size=1.5,
         )
 
         with open(meta_path, "r") as f:
@@ -224,7 +221,7 @@ class TestNodeOperations:
 
         assert data["nodes"][node_id]["name"] == "Updated Name"
         assert data["nodes"][node_id]["notes"] == "Updated notes"
-        assert data["nodes"][node_id]["color"] == "#00ff00"
+        assert data["nodes"][node_id]["size"] == 1.5
 
     def test_delete_user_node_removes_from_meta(self, storage, meta_path):
         """Delete User node"""
@@ -267,7 +264,7 @@ class TestNodeOperations:
         node_id = "Mathlib.Algebra.Field.Basic.div_add_div"
 
         # First add some meta
-        storage.update_node_meta(node_id, color="#ff0000", notes="test")
+        storage.update_node_meta(node_id, size=2.0, notes="test")
 
         # Confirm meta exists
         with open(meta_path, "r") as f:
@@ -359,18 +356,16 @@ class TestEdgeOperations:
 
         storage.update_edge_meta(
             edge_id,
-            color="#ff00ff",
-            width=3.0,
             style="dashed",
+            notes="Test note",
         )
 
         with open(meta_path, "r") as f:
             data = json.load(f)
 
         assert edge_id in data["edges"]
-        assert data["edges"][edge_id]["color"] == "#ff00ff"
-        assert data["edges"][edge_id]["width"] == 3.0
         assert data["edges"][edge_id]["style"] == "dashed"
+        assert data["edges"][edge_id]["notes"] == "Test note"
 
     def test_update_user_edge_meta(self, storage, meta_path):
         """Update User edge meta"""
@@ -381,16 +376,14 @@ class TestEdgeOperations:
         edge_id = "custom-a->custom-b"
         storage.update_edge_meta(
             edge_id,
-            color="#00ff00",
-            width=2.0,
+            style="dashed",
             notes="Updated",
         )
 
         with open(meta_path, "r") as f:
             data = json.load(f)
 
-        assert data["edges"][edge_id]["color"] == "#00ff00"
-        assert data["edges"][edge_id]["width"] == 2.0
+        assert data["edges"][edge_id]["style"] == "dashed"
         assert data["edges"][edge_id]["notes"] == "Updated"
 
     def test_delete_user_edge_removes_from_meta(self, storage, meta_path):
@@ -551,7 +544,7 @@ class TestDataMerge:
     def test_get_all_nodes_merges_lean_with_meta(self, storage):
         """get_all_nodes merges Lean data with meta"""
         node_id = "Mathlib.Algebra.Field.Basic.div_add_div"
-        storage.update_node_meta(node_id, color="#ff0000", notes="Custom note")
+        storage.update_node_meta(node_id, size=2.0, notes="Custom note")
 
         nodes = storage.get_all_nodes()
         node = next(n for n in nodes if n["id"] == node_id)
@@ -562,7 +555,7 @@ class TestDataMerge:
         assert node["file_path"] == "Mathlib/Algebra/Field/Basic.lean"
 
         # From meta
-        assert node["color"] == "#ff0000"
+        assert node["size"] == 2.0
         assert node["notes"] == "Custom note"
 
     def test_get_all_edges_includes_lean_edges(self, storage):
@@ -586,7 +579,7 @@ class TestDataMerge:
     def test_get_all_edges_merges_lean_with_meta(self, storage):
         """get_all_edges merges Lean data with meta"""
         edge_id = "Mathlib.Algebra.Field.Basic.div_add_div->Mathlib.Algebra.Ring.add_comm"
-        storage.update_edge_meta(edge_id, color="#ff0000", width=3.0)
+        storage.update_edge_meta(edge_id, style="dashed", notes="Test")
 
         edges = storage.get_all_edges()
         edge = next(e for e in edges if e["id"] == edge_id)
@@ -596,19 +589,19 @@ class TestDataMerge:
         assert edge["target"] == "Mathlib.Algebra.Ring.add_comm"
 
         # From meta
-        assert edge["color"] == "#ff0000"
-        assert edge["width"] == 3.0
+        assert edge["style"] == "dashed"
+        assert edge["notes"] == "Test"
 
     def test_get_node_returns_merged_lean_node(self, storage):
         """get_node returns merged Lean node"""
         node_id = "Mathlib.Algebra.Field.Basic.div_add_div"
-        storage.update_node_meta(node_id, color="#ff0000")
+        storage.update_node_meta(node_id, size=2.0)
 
         node = storage.get_node(node_id)
 
         assert node["id"] == node_id
         assert node["name"] == "div_add_div"  # From Lean
-        assert node["color"] == "#ff0000"     # From meta
+        assert node["size"] == 2.0            # From meta
 
     def test_get_node_returns_user_node(self, storage):
         """get_node returns User node"""
@@ -629,13 +622,13 @@ class TestDataMerge:
     def test_get_edge_returns_merged_lean_edge(self, storage):
         """get_edge returns merged Lean edge"""
         edge_id = "Mathlib.Algebra.Field.Basic.div_add_div->Mathlib.Algebra.Ring.add_comm"
-        storage.update_edge_meta(edge_id, color="#ff0000")
+        storage.update_edge_meta(edge_id, style="dashed")
 
         edge = storage.get_edge(edge_id)
 
         assert edge["id"] == edge_id
         assert edge["source"] == "Mathlib.Algebra.Field.Basic.div_add_div"
-        assert edge["color"] == "#ff0000"
+        assert edge["style"] == "dashed"
 
     def test_get_edge_returns_user_edge(self, storage):
         """get_edge returns User edge"""
@@ -713,7 +706,7 @@ class TestDataStructureValidation:
     def test_lean_node_meta_excludes_identity_fields(self, storage, meta_path):
         """Lean node meta doesn't store identity fields like name, kind, file_path"""
         node_id = "Mathlib.Algebra.Field.Basic.div_add_div"
-        storage.update_node_meta(node_id, color="#ff0000", notes="test")
+        storage.update_node_meta(node_id, size=2.0, notes="test")
 
         with open(meta_path, "r") as f:
             data = json.load(f)
@@ -827,76 +820,8 @@ class TestMixedScenarios:
 
 
 # ============================================
-# 8. Macros Operation Tests
 # ============================================
-
-class TestMacrosOperations:
-    """Macros operation tests"""
-
-    def test_get_macros_empty(self, storage):
-        """Initial macros is empty"""
-        macros = storage.get_macros()
-        assert macros == {}
-
-    def test_set_macros(self, storage, meta_path):
-        """Set macros (complete replacement)"""
-        storage.set_macros({"alpha": "\\alpha", "beta": "\\beta"})
-
-        macros = storage.get_macros()
-        assert macros == {"alpha": "\\alpha", "beta": "\\beta"}
-
-        # Verify persistence
-        with open(meta_path, "r") as f:
-            data = json.load(f)
-        assert data["macros"] == {"alpha": "\\alpha", "beta": "\\beta"}
-
-    def test_set_macros_replaces_existing(self, storage):
-        """set_macros replaces rather than merges"""
-        storage.set_macros({"alpha": "\\alpha"})
-        storage.set_macros({"beta": "\\beta"})
-
-        macros = storage.get_macros()
-        assert macros == {"beta": "\\beta"}
-        assert "alpha" not in macros
-
-    def test_update_macros_add(self, storage, meta_path):
-        """Incrementally add macros"""
-        storage.set_macros({"alpha": "\\alpha"})
-        storage.update_macros({"beta": "\\beta"})
-
-        macros = storage.get_macros()
-        assert macros == {"alpha": "\\alpha", "beta": "\\beta"}
-
-    def test_update_macros_modify(self, storage):
-        """Incrementally modify macros"""
-        storage.set_macros({"alpha": "\\alpha"})
-        storage.update_macros({"alpha": "\\Alpha"})
-
-        macros = storage.get_macros()
-        assert macros == {"alpha": "\\Alpha"}
-
-    def test_update_macros_delete(self, storage, meta_path):
-        """Use None to delete macros"""
-        storage.set_macros({"alpha": "\\alpha", "beta": "\\beta"})
-        storage.update_macros({"alpha": None})
-
-        macros = storage.get_macros()
-        assert macros == {"beta": "\\beta"}
-        assert "alpha" not in macros
-
-    def test_get_macros_returns_copy(self, storage):
-        """get_macros returns copy, modification doesn't affect original"""
-        storage.set_macros({"alpha": "\\alpha"})
-
-        macros = storage.get_macros()
-        macros["gamma"] = "\\gamma"
-
-        # Original data unaffected
-        assert storage.get_macros() == {"alpha": "\\alpha"}
-
-
-# ============================================
-# 9. Clear Operation Tests
+# 8. Clear Operation Tests
 # ============================================
 
 class TestClearOperation:
@@ -907,8 +832,7 @@ class TestClearOperation:
         # Add various data
         storage.add_user_node("custom-a", name="A", kind="custom")
         storage.add_user_edge("custom-a", "Mathlib.Algebra.Field.Basic.div_add_div")
-        storage.set_macros({"alpha": "\\alpha"})
-        storage.update_node_meta("Mathlib.Algebra.Field.Basic.div_add_div", color="#ff0000")
+        storage.update_node_meta("Mathlib.Algebra.Field.Basic.div_add_div", size=2.0)
 
         # Clear
         storage.clear()
@@ -919,7 +843,6 @@ class TestClearOperation:
 
         assert data["nodes"] == {}
         assert data["edges"] == {}
-        assert data["macros"] == {}
 
     def test_clear_preserves_lean_data(self, storage):
         """clear doesn't affect Lean data (graph_data)"""

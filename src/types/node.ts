@@ -41,7 +41,6 @@ export type ProofStatus =
 export interface NodeMeta {
   // Display
   label?: string;
-  color?: string;
   size?: number;
   shape?: string;
   effect?: string;
@@ -88,8 +87,6 @@ export interface Node {
 // ============================================
 
 export interface EdgeMeta {
-  width?: number;
-  color?: string;
   style?: string;  // 'solid' | 'dashed' | 'polyline'
   effect?: string;
   notes?: string;
@@ -120,7 +117,6 @@ export interface Edge {
 
 export interface NodeMetaUpdate {
   label?: string;
-  color?: string;
   size?: number;
   shape?: string;
   effect?: string;
