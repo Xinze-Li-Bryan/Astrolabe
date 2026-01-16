@@ -199,7 +199,24 @@ function LocalEditorContent() {
 
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
-    const { nodes: astrolabeNodes, edges: astrolabeEdges, legacyNodes: graphNodes, links: graphLinks, loading: graphLoading, reload: reloadGraph, reloadMeta, projectStatus, needsInit, notSupported, recheckStatus } = useGraphData(projectPath)
+    const {
+        nodes: astrolabeNodes,
+        edges: astrolabeEdges,
+        legacyNodes: graphNodes,
+        links: graphLinks,
+        loading: graphLoading,
+        reload: reloadGraph,
+        reloadMeta,
+        projectStatus,
+        needsInit,
+        notSupported,
+        recheckStatus,
+        rawNodeCount,
+        rawEdgeCount,
+        filterOptions,
+        setFilterOptions,
+        filterStats,
+    } = useGraphData(projectPath)
 
     // Color helper - extract color mapping from backend-returned node data
     const typeColors = useMemo(() => {
@@ -1249,6 +1266,11 @@ function LocalEditorContent() {
                             <div className="absolute top-3 left-3 z-10 flex gap-2">
                                 <div className="bg-black/60 px-3 py-1.5 rounded text-xs text-white/60 font-mono">
                                     {canvasNodes.length} / {graphNodes.length} nodes
+                                    {filterOptions.hideTechnical && (filterStats.removedNodes > 0 || filterStats.orphanedNodes > 0) && (
+                                        <span className="text-yellow-400/60 ml-1" title={`${filterStats.removedNodes} technical, ${filterStats.orphanedNodes} orphaned`}>
+                                            ({filterStats.removedNodes + filterStats.orphanedNodes} hidden)
+                                        </span>
+                                    )}
                                 </div>
 
                                 {/* Refresh button */}
@@ -1318,18 +1340,23 @@ function LocalEditorContent() {
                                     </button>
                                 )}
 
-                                {/* Following buttons temporarily hidden, to be developed later */}
-                                {/* Filter button - TODO: backend to be developed
+                                {/* Hide Technical Nodes toggle */}
                                 <button
-                                    onClick={() => {
-                                        console.log('[Canvas] Filter clicked - TODO: implement filter panel')
-                                    }}
-                                    className="p-1.5 bg-black/60 hover:bg-white/20 rounded transition-colors"
-                                    title="Filter (TODO)"
+                                    onClick={() => setFilterOptions({
+                                        ...filterOptions,
+                                        hideTechnical: !filterOptions.hideTechnical
+                                    })}
+                                    className={`p-1.5 rounded transition-colors ${
+                                        filterOptions.hideTechnical
+                                            ? 'bg-yellow-500/30 text-yellow-400'
+                                            : 'bg-black/60 text-white/60 hover:text-white hover:bg-white/20'
+                                    }`}
+                                    title={filterOptions.hideTechnical
+                                        ? 'Show Implementation Details'
+                                        : 'Hide Implementation Details (instances, coercions, etc.)'}
                                 >
-                                    <FunnelIcon className="w-4 h-4 text-white/60" />
+                                    <FunnelIcon className="w-4 h-4" />
                                 </button>
-                                */}
 
                                 {/* In-canvas find button - TODO: backend to be developed
                                 <button
