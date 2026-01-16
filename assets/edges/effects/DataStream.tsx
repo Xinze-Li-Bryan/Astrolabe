@@ -7,10 +7,26 @@ import type { EdgeEffectProps } from '../../types'
 
 const SEGMENT_COUNT = 6
 
+// Calculate position on quadratic Bezier curve
+function getQuadraticBezierPoint(
+  start: [number, number, number],
+  control: [number, number, number],
+  end: [number, number, number],
+  t: number
+): [number, number, number] {
+  const t1 = 1 - t
+  return [
+    t1 * t1 * start[0] + 2 * t1 * t * control[0] + t * t * end[0],
+    t1 * t1 * start[1] + 2 * t1 * t * control[1] + t * t * end[1],
+    t1 * t1 * start[2] + 2 * t1 * t * control[2] + t * t * end[2],
+  ]
+}
+
 /**
  * Data Stream Effect - digital data blocks flowing along the edge
+ * Supports curved paths via controlPoint for bidirectional edges
  */
-export function DataStream({ start, end, color, width }: EdgeEffectProps) {
+export function DataStream({ start, end, color, width, controlPoint }: EdgeEffectProps) {
   const groupRef = useRef<THREE.Group>(null)
   const progressRef = useRef<number[]>([])
 
@@ -18,18 +34,6 @@ export function DataStream({ start, end, color, width }: EdgeEffectProps) {
   useMemo(() => {
     progressRef.current = Array.from({ length: SEGMENT_COUNT }, (_, i) => i / SEGMENT_COUNT)
   }, [])
-
-  // Calculate direction
-  const { dir, length } = useMemo(() => {
-    const direction = new THREE.Vector3(
-      end[0] - start[0],
-      end[1] - start[1],
-      end[2] - start[2]
-    )
-    const len = direction.length()
-    direction.normalize()
-    return { dir: direction, length: len }
-  }, [start, end])
 
   const blockSize = Math.max(width * 0.08, 0.04)
 
@@ -44,12 +48,18 @@ export function DataStream({ start, end, color, width }: EdgeEffectProps) {
 
       const t = progressRef.current[i]
 
-      // Calculate position
-      block.position.set(
-        start[0] + dir.x * length * t,
-        start[1] + dir.y * length * t,
-        start[2] + dir.z * length * t
-      )
+      // Calculate position - use curve if controlPoint exists, otherwise straight line
+      let pos: [number, number, number]
+      if (controlPoint) {
+        pos = getQuadraticBezierPoint(start, controlPoint, end, t)
+      } else {
+        pos = [
+          start[0] + (end[0] - start[0]) * t,
+          start[1] + (end[1] - start[1]) * t,
+          start[2] + (end[2] - start[2]) * t,
+        ]
+      }
+      block.position.set(pos[0], pos[1], pos[2])
 
       // Fade in/out
       const opacity = Math.sin(t * Math.PI)

@@ -8,6 +8,53 @@ import { create } from 'zustand'
 
 const API_BASE = 'http://127.0.0.1:8765'
 
+/**
+ * Detect if adding a new edge would create a cycle in the graph
+ * Uses DFS to check if there's a path from target to source
+ */
+function wouldCreateCycle(
+  edges: { source: string; target: string }[],
+  newSource: string,
+  newTarget: string
+): boolean {
+  // Build adjacency list
+  const adjacency = new Map<string, string[]>()
+  for (const edge of edges) {
+    if (!adjacency.has(edge.source)) {
+      adjacency.set(edge.source, [])
+    }
+    adjacency.get(edge.source)!.push(edge.target)
+  }
+
+  // Add the new edge temporarily
+  if (!adjacency.has(newSource)) {
+    adjacency.set(newSource, [])
+  }
+  adjacency.get(newSource)!.push(newTarget)
+
+  // DFS to check if there's a path from newTarget back to newSource
+  const visited = new Set<string>()
+  const stack = [newTarget]
+
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node === newSource) {
+      return true // Found a cycle
+    }
+    if (visited.has(node)) continue
+    visited.add(node)
+
+    const neighbors = adjacency.get(node) || []
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor)) {
+        stack.push(neighbor)
+      }
+    }
+  }
+
+  return false
+}
+
 export interface SearchResult {
   id: string
   name: string
@@ -34,7 +81,6 @@ export interface CustomNode {
   notes?: string
   effect?: string
   size?: number
-  color?: string
 }
 
 // Custom edge type
@@ -45,8 +91,6 @@ export interface CustomEdge {
   notes?: string
   style?: string
   effect?: string
-  width?: number
-  color?: string
 }
 
 // 3D position type
@@ -95,7 +139,7 @@ interface CanvasState {
   addCustomNode: (id: string, name: string) => Promise<CustomNode | null>
   updateCustomNode: (nodeId: string, updates: Partial<CustomNode>) => Promise<void>
   removeCustomNode: (nodeId: string) => Promise<void>
-  addCustomEdge: (source: string, target: string) => Promise<CustomEdge | null>
+  addCustomEdge: (source: string, target: string, allEdges?: { source: string; target: string }[]) => Promise<{ edge: CustomEdge | null; error?: string }>
   removeCustomEdge: (edgeId: string) => Promise<void>
 
   // Unified node deletion (delete meta + remove from canvas)
@@ -411,7 +455,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         notes: data.node.notes,
         effect: data.node.effect,
         size: data.node.size,
-        color: data.node.color,
       }
       set({ customNodes: [...customNodes, newNode] })
 
@@ -449,7 +492,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
               notes: data.node?.notes ?? node.notes,
               effect: data.node?.effect ?? node.effect,
               size: data.node?.size ?? node.size,
-              color: data.node?.color ?? node.color,
             }
           : node
       )
@@ -483,9 +525,23 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
   },
 
-  addCustomEdge: async (source, target) => {
+  addCustomEdge: async (source, target, allEdges) => {
     const { projectPath, customEdges } = get()
-    if (!projectPath) return null
+    if (!projectPath) return { edge: null, error: 'No project loaded' }
+
+    // Check for cycle if allEdges provided
+    if (allEdges) {
+      // Combine all edges (Lean + custom) for cycle detection
+      const combinedEdges = [
+        ...allEdges,
+        ...customEdges.map(e => ({ source: e.source, target: e.target }))
+      ]
+
+      if (wouldCreateCycle(combinedEdges, source, target)) {
+        console.warn('[CanvasStore] Blocked edge creation: would create cycle', source, '->', target)
+        return { edge: null, error: 'Cannot create edge: this would create a circular dependency' }
+      }
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/project/user-edge`, {
@@ -497,7 +553,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       if (!res.ok) {
         const error = await res.json()
         console.error('[CanvasStore] Add custom edge failed:', error)
-        return null
+        return { edge: null, error: error.detail || 'Failed to create edge' }
       }
 
       const data = await res.json()
@@ -509,16 +565,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         notes: data.edge.notes,
         style: data.edge.style,
         effect: data.edge.effect,
-        width: data.edge.width,
-        color: data.edge.color,
       }
       set({ customEdges: [...customEdges, newEdge] })
       console.log('[CanvasStore] Added custom edge:', newEdge.id)
 
-      return newEdge
+      return { edge: newEdge }
     } catch (e) {
       console.error('[CanvasStore] Add custom edge failed:', e)
-      return null
+      return { edge: null, error: 'Failed to create edge' }
     }
   },
 

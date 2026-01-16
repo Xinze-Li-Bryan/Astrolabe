@@ -6,22 +6,37 @@ import { Line } from '@react-three/drei'
 import * as THREE from 'three'
 import type { EdgeEffectProps } from '../../types'
 
+// Calculate position on quadratic Bezier curve
+function getQuadraticBezierPoint(
+  start: [number, number, number],
+  control: [number, number, number],
+  end: [number, number, number],
+  t: number
+): [number, number, number] {
+  const t1 = 1 - t
+  return [
+    t1 * t1 * start[0] + 2 * t1 * t * control[0] + t * t * end[0],
+    t1 * t1 * start[1] + 2 * t1 * t * control[1] + t * t * end[1],
+    t1 * t1 * start[2] + 2 * t1 * t * control[2] + t * t * end[2],
+  ]
+}
+
 /**
  * Lightning Effect - flickering electric arc along the edge
+ * Supports curved paths via controlPoint for bidirectional edges
  */
-export function Lightning({ start, end, color, width }: EdgeEffectProps) {
+export function Lightning({ start, end, color, width, controlPoint }: EdgeEffectProps) {
   const lineRef = useRef<THREE.Line>(null)
   const pointsRef = useRef<[number, number, number][]>([])
   const timeRef = useRef(0)
 
-  // Calculate direction and perpendicular vectors
-  const { dir, perp, length } = useMemo(() => {
+  // Calculate perpendicular vector for jitter
+  const perp = useMemo(() => {
     const direction = new THREE.Vector3(
       end[0] - start[0],
       end[1] - start[1],
       end[2] - start[2]
     )
-    const len = direction.length()
     direction.normalize()
 
     const up = new THREE.Vector3(0, 1, 0)
@@ -30,7 +45,7 @@ export function Lightning({ start, end, color, width }: EdgeEffectProps) {
       perpendicular.crossVectors(direction, new THREE.Vector3(1, 0, 0)).normalize()
     }
 
-    return { dir: direction, perp: perpendicular, length: len }
+    return perpendicular
   }, [start, end])
 
   // Generate lightning path
@@ -41,18 +56,27 @@ export function Lightning({ start, end, color, width }: EdgeEffectProps) {
 
     for (let i = 0; i <= segments; i++) {
       const t = i / segments
-      const baseX = start[0] + (end[0] - start[0]) * t
-      const baseY = start[1] + (end[1] - start[1]) * t
-      const baseZ = start[2] + (end[2] - start[2]) * t
+
+      // Base position - use curve if controlPoint exists
+      let base: [number, number, number]
+      if (controlPoint) {
+        base = getQuadraticBezierPoint(start, controlPoint, end, t)
+      } else {
+        base = [
+          start[0] + (end[0] - start[0]) * t,
+          start[1] + (end[1] - start[1]) * t,
+          start[2] + (end[2] - start[2]) * t,
+        ]
+      }
 
       // Random offset, fades at edges
       const edgeFade = Math.sin(t * Math.PI)
       const jitter = (Math.random() - 0.5) * 2 * amplitude * edgeFade
 
       points.push([
-        baseX + perp.x * jitter,
-        baseY + perp.y * jitter,
-        baseZ + perp.z * jitter,
+        base[0] + perp.x * jitter,
+        base[1] + perp.y * jitter,
+        base[2] + perp.z * jitter,
       ])
     }
 
@@ -62,7 +86,7 @@ export function Lightning({ start, end, color, width }: EdgeEffectProps) {
   // Initialize
   useMemo(() => {
     pointsRef.current = generateLightning()
-  }, [start, end])
+  }, [start, end, controlPoint])
 
   useFrame((_, delta) => {
     timeRef.current += delta

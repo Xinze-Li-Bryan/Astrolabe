@@ -162,7 +162,7 @@ class Project:
             "edges": [{"source": e.source, "target": e.target} for e in self.edges],
         }
         meta_path = self.project_path / ".astrolabe" / "meta.json"
-        self.storage = UnifiedStorage(graph_data, meta_path)
+        self.storage = UnifiedStorage(graph_data, meta_path, project_path=self.project_path)
 
         # 8. Merge meta to nodes (using storage)
         from .models.node import NodeMeta
@@ -311,7 +311,7 @@ class Project:
             "edges": [{"source": e.source, "target": e.target} for e in self.edges],
         }
         meta_path = self.project_path / ".astrolabe" / "meta.json"
-        self.storage = UnifiedStorage(graph_data, meta_path)
+        self.storage = UnifiedStorage(graph_data, meta_path, project_path=self.project_path)
 
         # Update node meta (using storage)
         from .models.node import NodeMeta
@@ -330,17 +330,6 @@ class Project:
                 edge.meta = EdgeMeta.from_dict(meta_data)
             else:
                 edge.meta = EdgeMeta()
-
-    def get_macros(self) -> dict[str, str]:
-        """Get custom LaTeX macros"""
-        if self.storage:
-            return self.storage.get_macros()
-        return {}
-
-    def set_macros(self, macros: dict[str, str]):
-        """Set custom LaTeX macros"""
-        if self.storage:
-            self.storage.set_macros(macros)
 
     def update_node_meta(self, node_id: str, updates: dict):
         """
@@ -452,5 +441,4 @@ class Project:
             "nodes": nodes_json,
             "edges": [e.to_dict() for e in self.edges],
             "stats": self.get_stats(),
-            "macros": self.get_macros(),
         }

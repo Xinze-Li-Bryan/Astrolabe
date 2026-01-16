@@ -141,8 +141,8 @@ export const STATUS_COLORS: Record<string, string> = {
 }
 
 export function getNodeColor(node: Node): string {
-  // Priority: user custom > backend default style > local KIND_COLORS fallback
-  return node.meta?.color || node.defaultColor || KIND_COLORS[node.kind.toLowerCase()] || KIND_COLORS.unknown
+  // Priority: backend default style > local KIND_COLORS fallback (user color override removed)
+  return node.defaultColor || KIND_COLORS[node.kind.toLowerCase()] || KIND_COLORS.unknown
 }
 
 export function getStatusColor(status: string): string {

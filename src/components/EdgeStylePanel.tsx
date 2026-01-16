@@ -7,15 +7,12 @@ interface EdgeStylePanelProps {
     edgeId: string | null
     sourceNode?: string
     targetNode?: string
-    initialWidth?: number
     initialStyle?: string
     initialEffect?: string
     defaultStyle?: string  // 该边的默认样式（custom edge 为 'dashed'，普通边为 'solid'）
-    onStyleChange: (edgeId: string, style: { effect?: string; width?: number; style?: string }) => void
+    onStyleChange: (edgeId: string, style: { effect?: string; style?: string }) => void
     compact?: boolean
 }
-
-const DEFAULT_WIDTH = 1.0
 
 // SVG Icons for edge styles
 const StyleIcons: Record<string, React.ReactNode> = {
@@ -104,23 +101,20 @@ export default function EdgeStylePanel({
     edgeId,
     sourceNode,
     targetNode,
-    initialWidth = DEFAULT_WIDTH,
     initialStyle = 'solid',
     initialEffect,
     defaultStyle = 'solid',
     onStyleChange,
     compact = false
 }: EdgeStylePanelProps) {
-    const [editWidth, setEditWidth] = useState(initialWidth)
     const [editStyle, setEditStyle] = useState(initialStyle)
     const [editEffect, setEditEffect] = useState<string | undefined>(initialEffect)
 
     // Sync with external changes
     useEffect(() => {
-        setEditWidth(initialWidth)
         setEditStyle(initialStyle)
         setEditEffect(initialEffect)
-    }, [initialWidth, initialStyle, initialEffect, edgeId])
+    }, [initialStyle, initialEffect, edgeId])
 
     // Handle style change
     const handleStyleChange = useCallback((styleId: string) => {
@@ -128,11 +122,10 @@ export default function EdgeStylePanel({
         if (edgeId) {
             onStyleChange(edgeId, {
                 style: styleId,
-                width: editWidth !== DEFAULT_WIDTH ? editWidth : undefined,
                 effect: editEffect
             })
         }
-    }, [edgeId, editWidth, editEffect, onStyleChange])
+    }, [edgeId, editEffect, onStyleChange])
 
     // Handle effect change
     const handleEffectChange = useCallback((effectId: string | undefined) => {
@@ -141,33 +134,19 @@ export default function EdgeStylePanel({
             onStyleChange(edgeId, {
                 // Send empty string to delete effect, undefined is ignored
                 effect: effectId === undefined ? '' : effectId,
-                width: editWidth !== DEFAULT_WIDTH ? editWidth : undefined,
                 style: editStyle !== defaultStyle ? editStyle : undefined
             })
         }
-    }, [edgeId, editWidth, editStyle, defaultStyle, onStyleChange])
-
-    // Handle width change
-    const handleWidthChange = useCallback((width: number) => {
-        setEditWidth(width)
-        if (edgeId) {
-            onStyleChange(edgeId, {
-                width: width !== DEFAULT_WIDTH ? width : undefined,
-                style: editStyle !== defaultStyle ? editStyle : undefined,
-                effect: editEffect
-            })
-        }
-    }, [edgeId, editStyle, editEffect, defaultStyle, onStyleChange])
+    }, [edgeId, editStyle, defaultStyle, onStyleChange])
 
     // Reset to default - send empty string/sentinel to signal deletion
     // Also reset UI button state to this edge's default style
     const handleReset = useCallback(() => {
-        setEditWidth(DEFAULT_WIDTH)
         setEditStyle(defaultStyle)  // Use this edge's default style (custom edge is 'dashed')
         setEditEffect(undefined)
         if (edgeId) {
-            // Send empty string or -1 to indicate deletion of these properties
-            onStyleChange(edgeId, { width: -1, style: '', effect: '' })
+            // Send empty string to indicate deletion of these properties
+            onStyleChange(edgeId, { style: '', effect: '' })
         }
     }, [edgeId, defaultStyle, onStyleChange])
 

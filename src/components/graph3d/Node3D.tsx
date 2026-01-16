@@ -94,8 +94,8 @@ export const Node3D = memo(function Node3D({
   const initialPos = positionsRef.current.get(node.id) || [0, 0, 0]
   const targetPos = useRef(new THREE.Vector3(...initialPos))
 
-  // Color: meta override > default value
-  const color = node.meta?.color ?? node.defaultColor
+  // Color: always use default value based on kind
+  const color = node.defaultColor
 
   // Size: meta override > default value, then scale to appropriate size
   const size = (node.meta?.size ?? node.defaultSize) * 0.5

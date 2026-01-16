@@ -91,7 +91,6 @@ function backendNodeToAstrolabe(node: Node): AstrolabeNode {
     defaultShape: node.defaultShape,
 
     // User overrides (from meta.json)
-    color: node.meta.color,
     size: node.meta.size,
     shape: node.meta.shape,
     effect: node.meta.effect,
@@ -117,9 +116,7 @@ function backendEdgeToAstrolabe(edge: Edge): AstrolabeEdge {
     defaultWidth: edge.defaultWidth,
     defaultStyle: edge.defaultStyle,
 
-    // User overrides (from meta.json)
-    color: edge.meta?.color,
-    width: edge.meta?.width,
+    // User overrides (from meta.json) - color and width removed
     style: edge.meta?.style,
     effect: edge.meta?.effect,
 
@@ -190,8 +187,8 @@ export function useGraphData(projectPath: string): GraphData {
 
   const reload = useCallback(async () => {
     loadedRef.current = false
-    setRawNodes([])
-    setRawEdges([])
+    // Don't clear nodes/edges to [] - this would trigger ForceGraph3D to clear all positions
+    // Just set loading state and let the new data replace the old
     setLoading(true)
 
     try {
@@ -269,7 +266,7 @@ export function useGraphData(projectPath: string): GraphData {
     leanFilePath: node.leanFile?.path,
     leanLineNumber: node.leanFile?.line,
     notes: node.notes,  // User notes
-    customColor: node.color ?? node.defaultColor,
+    customColor: node.defaultColor,
     customSize: node.size ?? node.defaultSize,
     customEffect: node.effect,
     x: node.position?.x,

@@ -505,14 +505,13 @@ export function ForceGraph3D({
       dependsOnCount: 0,
       usedByCount: 0,
       depth: 0,
-      defaultColor: cn.color || CUSTOM_NODE_COLOR,
+      defaultColor: CUSTOM_NODE_COLOR,
       defaultSize: cn.size || 1.0,
       defaultShape: 'octahedron',
       meta: {
         notes: cn.notes,
         effect: cn.effect,
         size: cn.size,
-        color: cn.color,
       },
     }))
   }, [customNodes])
@@ -531,8 +530,6 @@ export function ForceGraph3D({
         notes: ce.notes,
         style: ce.style,
         effect: ce.effect,
-        width: ce.width,
-        color: ce.color,
       },
     }))
   }, [customEdges])

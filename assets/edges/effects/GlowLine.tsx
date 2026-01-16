@@ -8,12 +8,15 @@ import type { EdgeEffectProps } from '../../types'
 
 /**
  * Glow Line Effect - breathing glow effect
+ * Note: For curved edges, this still renders a straight glow between start and end
+ * (capsule geometry doesn't support curves)
  */
-export function GlowLine({ start, end, color, width }: EdgeEffectProps) {
+export function GlowLine({ start, end, color, width, controlPoint }: EdgeEffectProps) {
   const glow1Ref = useRef<THREE.Mesh>(null)
   const glow2Ref = useRef<THREE.Mesh>(null)
 
   // Calculate midpoint and direction
+  // For curved edges, we still use straight line between start and end for the glow
   const { midPoint, rotation, length } = useMemo(() => {
     const mid = new THREE.Vector3(
       (start[0] + end[0]) / 2,

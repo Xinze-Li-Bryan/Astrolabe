@@ -7,10 +7,26 @@ import type { EdgeEffectProps } from '../../types'
 
 const SPARKLE_COUNT = 8
 
+// Calculate position on quadratic Bezier curve
+function getQuadraticBezierPoint(
+  start: [number, number, number],
+  control: [number, number, number],
+  end: [number, number, number],
+  t: number
+): [number, number, number] {
+  const t1 = 1 - t
+  return [
+    t1 * t1 * start[0] + 2 * t1 * t * control[0] + t * t * end[0],
+    t1 * t1 * start[1] + 2 * t1 * t * control[1] + t * t * end[1],
+    t1 * t1 * start[2] + 2 * t1 * t * control[2] + t * t * end[2],
+  ]
+}
+
 /**
  * Sparkle Effect - stars twinkling at random positions along the edge
+ * Supports curved paths via controlPoint for bidirectional edges
  */
-export function Sparkle({ start, end, color, width }: EdgeEffectProps) {
+export function Sparkle({ start, end, color, width, controlPoint }: EdgeEffectProps) {
   const groupRef = useRef<THREE.Group>(null)
   const sparklesRef = useRef<{ t: number; phase: number; lifetime: number }[]>([])
 
@@ -34,13 +50,19 @@ export function Sparkle({ start, end, color, width }: EdgeEffectProps) {
       const sparkle = sparklesRef.current[i]
       if (!sparkle) return
 
-      // Calculate position
+      // Calculate position - use curve if controlPoint exists
       const t = sparkle.t
-      particle.position.set(
-        start[0] + (end[0] - start[0]) * t,
-        start[1] + (end[1] - start[1]) * t,
-        start[2] + (end[2] - start[2]) * t
-      )
+      let pos: [number, number, number]
+      if (controlPoint) {
+        pos = getQuadraticBezierPoint(start, controlPoint, end, t)
+      } else {
+        pos = [
+          start[0] + (end[0] - start[0]) * t,
+          start[1] + (end[1] - start[1]) * t,
+          start[2] + (end[2] - start[2]) * t,
+        ]
+      }
+      particle.position.set(pos[0], pos[1], pos[2])
 
       // Twinkle effect
       const flicker = Math.sin(time * 8 + sparkle.phase) * 0.5 + 0.5

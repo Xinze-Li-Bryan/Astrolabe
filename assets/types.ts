@@ -45,6 +45,7 @@ export interface EdgeEffectProps {
   end: [number, number, number]     // end position
   color: string                     // color
   width: number                     // line width
+  controlPoint?: [number, number, number]  // optional control point for curved edges (quadratic Bezier)
 }
 
 // Effect metadata (for UI display)

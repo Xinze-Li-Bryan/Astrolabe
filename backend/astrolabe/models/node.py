@@ -16,7 +16,6 @@ class NodeMeta:
 
     # Display
     label: Optional[str] = None
-    color: Optional[str] = None
     size: Optional[float] = None
     shape: Optional[str] = None
     effect: Optional[str] = None
@@ -34,8 +33,6 @@ class NodeMeta:
         result = {}
         if self.label:
             result["label"] = self.label
-        if self.color:
-            result["color"] = self.color
         if self.size is not None:
             result["size"] = self.size
         if self.shape:
@@ -54,11 +51,10 @@ class NodeMeta:
     def from_dict(cls, data: dict) -> "NodeMeta":
         """Create NodeMeta from dict
 
-        Note: For backward compatibility, ignores old texStatement/texProof fields
+        Note: For backward compatibility, ignores old fields like color, texStatement, texProof
         """
         return cls(
             label=data.get("label"),
-            color=data.get("color"),
             size=data.get("size"),
             shape=data.get("shape"),
             effect=data.get("effect"),
