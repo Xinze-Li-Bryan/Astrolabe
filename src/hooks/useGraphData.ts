@@ -36,6 +36,7 @@ export interface FilterStats {
   removedNodes: number      // Technical nodes filtered out
   virtualEdgesCreated: number  // Through-link edges created
   orphanedNodes: number     // Nodes removed because they became disconnected
+  transitiveEdgesRemoved: number  // Edges removed by transitive reduction
 }
 
 export interface GraphData {
@@ -241,11 +242,15 @@ export function useGraphData(projectPath: string): GraphData {
   const { nodes, edges, stats: filterStats } = useMemo(
     () => {
       const result = processGraph(rawNodes, rawEdges, filterOptions)
-      if (filterOptions.hideTechnical && (result.stats.removedNodes > 0 || result.stats.orphanedNodes > 0)) {
+      const hasChanges = result.stats.removedNodes > 0 ||
+        result.stats.orphanedNodes > 0 ||
+        result.stats.transitiveEdgesRemoved > 0
+      if (hasChanges) {
         console.log(
           `[processGraph] Filtered ${result.stats.removedNodes} technical nodes, ` +
           `${result.stats.orphanedNodes} orphaned nodes, ` +
-          `created ${result.stats.virtualEdgesCreated} virtual edges. ` +
+          `created ${result.stats.virtualEdgesCreated} virtual edges, ` +
+          `removed ${result.stats.transitiveEdgesRemoved} transitive edges. ` +
           `Result: ${result.nodes.length} nodes, ${result.edges.length} edges`
         )
       }

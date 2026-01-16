@@ -1265,11 +1265,11 @@ function LocalEditorContent() {
                             {/* Canvas toolbar - top left corner */}
                             <div className="absolute top-3 left-3 z-10 flex gap-2">
                                 <div className="bg-black/60 px-3 py-1.5 rounded text-xs text-white/60 font-mono">
-                                    {canvasNodes.length} / {graphNodes.length} nodes
+                                    <div>{canvasNodes.length} / {graphNodes.length} nodes</div>
                                     {filterOptions.hideTechnical && (filterStats.removedNodes > 0 || filterStats.orphanedNodes > 0) && (
-                                        <span className="text-yellow-400/60 ml-1" title={`${filterStats.removedNodes} technical, ${filterStats.orphanedNodes} orphaned`}>
+                                        <div className="text-yellow-400/60 text-[10px]" title={`${filterStats.removedNodes} technical, ${filterStats.orphanedNodes} orphaned`}>
                                             ({filterStats.removedNodes + filterStats.orphanedNodes} hidden)
-                                        </span>
+                                        </div>
                                     )}
                                 </div>
 

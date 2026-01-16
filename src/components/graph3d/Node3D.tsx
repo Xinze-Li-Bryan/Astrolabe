@@ -15,6 +15,7 @@ import type { Node } from '@/types/node'
 import { getNodeShape3D, getNodeEffect } from '@/../assets'
 import { StatusRing } from './effects/StatusRing'
 import type { ProofStatusType } from '@/lib/proofStatus'
+import { getNodeColor } from '@/lib/store'
 
 // Unicode subscript/superscript to ASCII mapping
 const UNICODE_TO_ASCII: Record<string, string> = {
@@ -94,8 +95,8 @@ export const Node3D = memo(function Node3D({
   const initialPos = positionsRef.current.get(node.id) || [0, 0, 0]
   const targetPos = useRef(new THREE.Vector3(...initialPos))
 
-  // Color: always use default value based on kind
-  const color = node.defaultColor
+  // Color: use getNodeColor which handles fallback to KIND_COLORS
+  const color = getNodeColor(node)
 
   // Size: meta override > default value, then scale to appropriate size
   const size = (node.meta?.size ?? node.defaultSize) * 0.5

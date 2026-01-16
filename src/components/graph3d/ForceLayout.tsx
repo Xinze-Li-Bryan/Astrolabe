@@ -10,10 +10,21 @@
  * - Verlet integration + damping
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Node, Edge } from '@/lib/store'
+import {
+  groupNodesByNamespace,
+  computeClusterCentroids,
+  calculateClusterForce,
+  calculateNodeDegrees,
+  calculateAdaptiveSpringLength,
+  type NamespaceGroups,
+  type NodeDegree,
+  type AdaptiveSpringMode,
+  type Vec3,
+} from '@/lib/graphProcessing'
 
 // Physics parameter types
 export interface PhysicsParams {
@@ -22,15 +33,31 @@ export interface PhysicsParams {
   springStrength: number     // Spring strength (default 2)
   centerStrength: number     // Center gravity (default 0.5)
   damping: number            // Damping coefficient (default 0.85)
+  // Namespace clustering
+  clusteringEnabled: boolean        // Enable namespace-based clustering (default false)
+  clusteringStrength: number        // Force pulling nodes toward cluster centroid (default 0.3)
+  clusteringDepth: number           // Namespace depth for clustering (default 1)
+  // Density-adaptive edge length
+  adaptiveSpringEnabled: boolean    // Enable density-adaptive spring length (default false)
+  adaptiveSpringMode: AdaptiveSpringMode  // 'linear' | 'logarithmic' | 'sqrt' (default 'sqrt')
+  adaptiveSpringScale: number       // Scale factor for degree-based adjustment (default 0.3)
 }
 
 // Default physics parameters
 export const DEFAULT_PHYSICS: PhysicsParams = {
-  repulsionStrength: 100,
-  springLength: 4,
-  springStrength: 2,
-  centerStrength: 0.5,
+  repulsionStrength: 150,    // Increased from 100 for better initial spacing
+  springLength: 6,           // Increased from 4 for less cluttered layout
+  springStrength: 1.5,       // Slightly reduced for more relaxed springs
+  centerStrength: 0.3,       // Reduced to allow more spread
   damping: 0.85,
+  // Namespace clustering defaults
+  clusteringEnabled: true,
+  clusteringStrength: 0.2,   // Reduced from 0.3 for less tight clusters
+  clusteringDepth: 1,
+  // Density-adaptive defaults
+  adaptiveSpringEnabled: true,
+  adaptiveSpringMode: 'sqrt',
+  adaptiveSpringScale: 0.5,  // Increased from 0.3 for longer edges on hubs
 }
 
 interface ForceLayoutProps {
@@ -45,6 +72,10 @@ interface ForceLayoutProps {
   savedPositionCount?: number
   /** Callback after physics simulation stabilizes */
   onStable?: () => void
+  /** Callback after warmup finishes and layout is ready to render */
+  onWarmupComplete?: () => void
+  /** OrbitControls ref for camera centering after warmup */
+  controlsRef?: React.RefObject<any>
 }
 
 /**
@@ -57,7 +88,9 @@ function simulateStep(
   positions: Map<string, [number, number, number]>,
   velocities: Map<string, [number, number, number]>,
   physics: PhysicsParams,
-  dt: number = 0.016
+  dt: number = 0.016,
+  namespaceGroups?: NamespaceGroups | null,
+  nodeDegrees?: Map<string, NodeDegree> | null
 ): number {
   if (positions.size === 0) return 0
 
@@ -99,7 +132,8 @@ function simulateStep(
     }
   }
 
-  // Attraction (Hooke's law)
+  // Attraction (Hooke's law) with optional adaptive spring length
+  const baseSpringLength = physics.springLength
   edges.forEach((edge) => {
     const p1 = positions.get(edge.source)
     const p2 = positions.get(edge.target)
@@ -109,7 +143,24 @@ function simulateStep(
     const dy = p2[1] - p1[1]
     const dz = p2[2] - p1[2]
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.1
-    const displacement = dist - physics.springLength
+
+    // Calculate spring length (adaptive or fixed)
+    let springLength = baseSpringLength
+    if (physics.adaptiveSpringEnabled && nodeDegrees) {
+      const deg1 = nodeDegrees.get(edge.source)
+      const deg2 = nodeDegrees.get(edge.target)
+      if (deg1 && deg2) {
+        springLength = calculateAdaptiveSpringLength(deg1, deg2, {
+          mode: physics.adaptiveSpringMode,
+          baseLength: baseSpringLength,
+          scaleFactor: physics.adaptiveSpringScale,
+          minLength: baseSpringLength * 0.5,
+          maxLength: baseSpringLength * 5,
+        })
+      }
+    }
+
+    const displacement = dist - springLength
     const force = physics.springStrength * displacement
 
     const f1 = forces.get(edge.source)
@@ -132,6 +183,42 @@ function simulateStep(
     f[1] -= pos[1] * physics.centerStrength
     f[2] -= pos[2] * physics.centerStrength
   })
+
+  // Namespace clustering force (optional)
+  if (physics.clusteringEnabled && namespaceGroups) {
+    // Convert positions to Vec3 format for centroid calculation
+    const positionsVec3 = new Map<string, Vec3>()
+    for (const [id, pos] of positions.entries()) {
+      positionsVec3.set(id, { x: pos[0], y: pos[1], z: pos[2] })
+    }
+
+    // Compute cluster centroids
+    const centroids = computeClusterCentroids(namespaceGroups, positionsVec3)
+
+    // Apply clustering force to each node
+    // Note: namespaceGroups values are AstrolabeNode[], not string[]
+    for (const [namespace, clusterNodes] of namespaceGroups.entries()) {
+      const centroid = centroids.get(namespace)
+      if (!centroid) continue
+
+      for (const node of clusterNodes) {
+        const pos = positions.get(node.id)  // Use node.id to get the string key
+        const f = forces.get(node.id)
+        if (!pos || !f) continue
+
+        const nodePos: Vec3 = { x: pos[0], y: pos[1], z: pos[2] }
+        const clusterForce = calculateClusterForce(
+          nodePos,
+          centroid,
+          physics.clusteringStrength
+        )
+
+        f[0] += clusterForce.x
+        f[1] += clusterForce.y
+        f[2] += clusterForce.z
+      }
+    }
+  }
 
   // Apply forces
   const maxVelocity = 10
@@ -173,7 +260,9 @@ function simulateStep(
  * Used when saved positions already exist
  */
 function centerAndScale(
-  positions: Map<string, [number, number, number]>
+  positions: Map<string, [number, number, number]>,
+  targetRadius: number = 12,
+  allowScaleUp: boolean = false
 ): void {
   if (positions.size === 0) return
 
@@ -200,11 +289,16 @@ function centerAndScale(
     maxRadius = Math.max(maxRadius, r)
   }
 
-  // 4. Scale to viewport
-  const targetRadius = 8
+  // 4. Scale to viewport (increased from 8 to accommodate clustering/adaptive springs spread)
   if (maxRadius > 0.1) {
     const scale = targetRadius / maxRadius
-    if (scale < 1) {
+    if (allowScaleUp) {
+      if (scale > 1) {
+        for (const [id, pos] of positions.entries()) {
+          positions.set(id, [pos[0] * scale, pos[1] * scale, pos[2] * scale])
+        }
+      }
+    } else if (scale < 1) {
       for (const [id, pos] of positions.entries()) {
         positions.set(id, [pos[0] * scale, pos[1] * scale, pos[2] * scale])
       }
@@ -215,6 +309,7 @@ function centerAndScale(
 /**
  * Warmup: Quickly run physics simulation until stable, then center and scale to appropriate size
  * Only used when there are no saved positions
+ * Now includes clustering and adaptive springs for consistent layout
  */
 function warmupSimulation(
   nodes: Node[],
@@ -222,14 +317,31 @@ function warmupSimulation(
   positions: Map<string, [number, number, number]>,
   physics: PhysicsParams,
   maxIterations: number = 500,
-  stabilityThreshold: number = 0.01
+  stabilityThreshold: number = 0.01,
+  targetRadius: number = 12,
+  allowScaleUp: boolean = false
 ): void {
   const velocities = new Map<string, [number, number, number]>()
   nodes.forEach((node) => velocities.set(node.id, [0, 0, 0]))
 
+  // Pre-compute namespace groups for clustering (if enabled)
+  let namespaceGroups: NamespaceGroups | null = null
+  if (physics.clusteringEnabled) {
+    const astrolabeNodes = nodes.map(n => ({ ...n, name: n.name || n.id }))
+    namespaceGroups = groupNodesByNamespace(astrolabeNodes as any, physics.clusteringDepth)
+  }
+
+  // Pre-compute node degrees for adaptive springs (if enabled)
+  let nodeDegrees: Map<string, NodeDegree> | null = null
+  if (physics.adaptiveSpringEnabled) {
+    const astrolabeNodes = nodes.map(n => ({ ...n, name: n.name || n.id }))
+    const astrolabeEdges = edges.map(e => ({ ...e }))
+    nodeDegrees = calculateNodeDegrees(astrolabeNodes as any, astrolabeEdges as any)
+  }
+
   let stableCount = 0
   for (let i = 0; i < maxIterations; i++) {
-    const movement = simulateStep(nodes, edges, positions, velocities, physics)
+    const movement = simulateStep(nodes, edges, positions, velocities, physics, 0.016, namespaceGroups, nodeDegrees)
     if (movement < stabilityThreshold) {
       stableCount++
       if (stableCount > 10) break // Stop after 10 consecutive stable frames
@@ -239,7 +351,7 @@ function warmupSimulation(
   }
 
   // Center and scale
-  centerAndScale(positions)
+  centerAndScale(positions, targetRadius, allowScaleUp)
 }
 
 export function ForceLayout({
@@ -252,9 +364,10 @@ export function ForceLayout({
   physics = DEFAULT_PHYSICS,
   savedPositionCount = 0,
   onStable,
+  onWarmupComplete,
+  controlsRef,
 }: ForceLayoutProps) {
-  // Use ref directly, don't trigger React re-renders
-  const positions = positionsRef.current
+  // Access positionsRef.current directly in callbacks to always get latest Map
   const velocities = useRef<Map<string, [number, number, number]>>(new Map())
   const { camera, raycaster, gl, pointer } = useThree()
   const dragPlane = useRef(new THREE.Plane())
@@ -265,33 +378,117 @@ export function ForceLayout({
   const hasWarmedUp = useRef(false)
   const lastNodeCount = useRef(0)
   const hasTriggeredStable = useRef(false)
+  const pendingWarmup = useRef(false)
+  const hasReportedWarmup = useRef(false)
 
-  // Warmup: Calculate stable positions before first render
-  useEffect(() => {
+  // Pre-compute namespace groups for clustering
+  const namespaceGroups = useMemo(() => {
+    if (!physics.clusteringEnabled) return null
+    // Convert Node[] to format expected by groupNodesByNamespace
+    const astrolabeNodes = nodes.map(n => ({ ...n, name: n.name || n.id }))
+    return groupNodesByNamespace(astrolabeNodes as any, physics.clusteringDepth)
+  }, [nodes, physics.clusteringEnabled, physics.clusteringDepth])
+
+  // Pre-compute node degrees for adaptive spring length
+  const nodeDegrees = useMemo(() => {
+    if (!physics.adaptiveSpringEnabled) return null
+    const astrolabeNodes = nodes.map(n => ({ ...n, name: n.name || n.id }))
+    const astrolabeEdges = edges.map(e => ({ ...e }))
+    return calculateNodeDegrees(astrolabeNodes as any, astrolabeEdges as any)
+  }, [nodes, edges, physics.adaptiveSpringEnabled])
+
+  const runWarmupIfNeeded = useCallback((source: string) => {
+    const positions = positionsRef.current
     // Detect if warmup is needed (first load or large change in node count)
     const currentCount = nodes.length
     const countChange = Math.abs(currentCount - lastNodeCount.current)
     const needsWarmup = !hasWarmedUp.current || countChange > currentCount * 0.5
 
-    if (needsWarmup && positions.size > 0) {
-      // If most nodes have saved positions (>50%), only center and scale, skip physics simulation
-      const savedRatio = savedPositionCount / currentCount
+    console.log(`[ForceLayout] Warmup check (${source}): nodes=${currentCount}, positions=${positions.size}, needsWarmup=${needsWarmup}, hasWarmedUp=${hasWarmedUp.current}`)
 
-      if (savedRatio > 0.5) {
-        console.log(`[ForceLayout] ${Math.round(savedRatio * 100)}% nodes have saved positions, skipping physics warmup`)
-        centerAndScale(positions)
-      } else {
-        console.log(`[ForceLayout] Warming up with ${positions.size} nodes (${Math.round(savedRatio * 100)}% have saved positions)...`)
-        warmupSimulation(nodes, edges, positions, physics)
+    if (currentCount === 0 || !needsWarmup) {
+      pendingWarmup.current = false
+      lastNodeCount.current = currentCount
+      if (!hasReportedWarmup.current && positions.size > 0) {
+        hasReportedWarmup.current = true
+        onWarmupComplete?.()
       }
-
-      hasWarmedUp.current = true
-      stableFrames.current = 61 // Mark as stable, skip subsequent frames
-      console.log('[ForceLayout] Initialization complete, positions stabilized')
+      return
     }
 
+    if (positions.size === 0) {
+      pendingWarmup.current = true
+      lastNodeCount.current = currentCount
+      hasReportedWarmup.current = false
+      return
+    }
+
+    pendingWarmup.current = false
+    hasReportedWarmup.current = false
+
+    // If most nodes have saved positions (>50%), only center and scale, skip physics simulation
+    const savedRatio = savedPositionCount / currentCount
+
+    const baseRadius = 12
+    const dynamicRadius = Math.sqrt(currentCount) * physics.springLength * 0.5
+    const targetRadius = Math.min(24, Math.max(baseRadius, dynamicRadius))
+
+    // Calculate center of mass and max radius to detect dense graphs
+    let cx = 0, cy = 0, cz = 0
+    for (const pos of positions.values()) {
+      cx += pos[0]
+      cy += pos[1]
+      cz += pos[2]
+    }
+    cx /= positions.size
+    cy /= positions.size
+    cz /= positions.size
+
+    let maxRadiusBefore = 0
+    for (const pos of positions.values()) {
+      const dx = pos[0] - cx
+      const dy = pos[1] - cy
+      const dz = pos[2] - cz
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+      maxRadiusBefore = Math.max(maxRadiusBefore, dist)
+    }
+    const denseNodeCountThreshold = 20
+    const denseRadiusThreshold = targetRadius * 0.8
+    const looksDense = positions.size >= denseNodeCountThreshold && maxRadiusBefore < denseRadiusThreshold
+    const allowScaleUp = positions.size >= denseNodeCountThreshold
+
+    const baseIterations = Math.min(1600, 300 + currentCount * 10)
+    const warmupIterations = looksDense ? baseIterations : Math.min(800, baseIterations)
+    const stabilityThreshold = looksDense ? 0.002 : 0.01
+
+    if (savedRatio > 0.5 && !looksDense) {
+      console.log(`[ForceLayout] ${Math.round(savedRatio * 100)}% nodes have saved positions, skipping physics warmup`)
+      centerAndScale(positions, targetRadius, allowScaleUp)
+    } else {
+      console.log(`[ForceLayout] Warming up with ${positions.size} nodes (${Math.round(savedRatio * 100)}% have saved positions)...`)
+      warmupSimulation(nodes, edges, positions, physics, warmupIterations, stabilityThreshold, targetRadius, allowScaleUp)
+    }
+
+    // Pre-bake layout: mark stable and save once before first render
+    stableFrames.current = 61
+    if (onStable && !hasTriggeredStable.current) {
+      hasTriggeredStable.current = true
+      onStable()
+    }
+    if (!hasReportedWarmup.current) {
+      hasReportedWarmup.current = true
+      onWarmupComplete?.()
+    }
+
+    hasWarmedUp.current = true
     lastNodeCount.current = currentCount
-  }, [nodes, edges, physics, positions, savedPositionCount])
+    console.log('[ForceLayout] Initialization complete')
+  }, [nodes, edges, physics, savedPositionCount, onStable, onWarmupComplete])
+
+  // Warmup: Calculate stable positions before first render
+  useEffect(() => {
+    runWarmupIfNeeded('effect')
+  }, [runWarmupIfNeeded])
 
   // Initialize velocities
   useEffect(() => {
@@ -319,7 +516,12 @@ export function ForceLayout({
   }, [draggingNodeId, setDraggingNodeId, gl.domElement])
 
   useFrame((_, delta) => {
-    if (positions.size === 0 || !running) return
+    if (pendingWarmup.current && positionsRef.current.size > 0) {
+      runWarmupIfNeeded('pending')
+    }
+
+    const positions = positionsRef.current
+    if (!positions || positions.size === 0 || !running) return
 
     // Skip frames after stable to reduce CPU usage
     if (!draggingNodeId && stableFrames.current > 60) {
@@ -413,8 +615,8 @@ export function ForceLayout({
       }
     }
 
-    // Attraction (Hooke's law)
-    const springLength = physics.springLength
+    // Attraction (Hooke's law) with optional adaptive spring length
+    const baseSpringLength = physics.springLength
     const springStrength = physics.springStrength
 
     edges.forEach((edge) => {
@@ -426,6 +628,23 @@ export function ForceLayout({
       const dy = p2[1] - p1[1]
       const dz = p2[2] - p1[2]
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.1
+
+      // Calculate spring length (adaptive or fixed)
+      let springLength = baseSpringLength
+      if (physics.adaptiveSpringEnabled && nodeDegrees) {
+        const deg1 = nodeDegrees.get(edge.source)
+        const deg2 = nodeDegrees.get(edge.target)
+        if (deg1 && deg2) {
+          springLength = calculateAdaptiveSpringLength(deg1, deg2, {
+            mode: physics.adaptiveSpringMode,
+            baseLength: baseSpringLength,
+            scaleFactor: physics.adaptiveSpringScale,
+            minLength: baseSpringLength * 0.5,
+            maxLength: baseSpringLength * 5,
+          })
+        }
+      }
+
       const displacement = dist - springLength
       const force = springStrength * displacement
 
@@ -454,6 +673,41 @@ export function ForceLayout({
       f[1] -= pos[1] * centerStrength
       f[2] -= pos[2] * centerStrength
     })
+
+    // Namespace clustering force
+    if (physics.clusteringEnabled && namespaceGroups) {
+      // Convert positions to Vec3 format for centroid calculation
+      const positionsVec3 = new Map<string, Vec3>()
+      for (const [id, pos] of positions.entries()) {
+        positionsVec3.set(id, { x: pos[0], y: pos[1], z: pos[2] })
+      }
+
+      // Compute cluster centroids
+      const centroids = computeClusterCentroids(namespaceGroups, positionsVec3)
+
+      // Apply clustering force to each node by iterating over groups
+      for (const [namespace, clusterNodes] of namespaceGroups.entries()) {
+        const centroid = centroids.get(namespace)
+        if (!centroid) continue
+
+        for (const node of clusterNodes) {
+          const pos = positions.get(node.id)
+          const f = forces.get(node.id)
+          if (!pos || !f) continue
+
+          const nodePos: Vec3 = { x: pos[0], y: pos[1], z: pos[2] }
+          const clusterForce = calculateClusterForce(
+            nodePos,
+            centroid,
+            physics.clusteringStrength
+          )
+
+          f[0] += clusterForce.x
+          f[1] += clusterForce.y
+          f[2] += clusterForce.z
+        }
+      }
+    }
 
     // Apply forces (Verlet integration)
     const damping = physics.damping
