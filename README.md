@@ -21,6 +21,7 @@ Get started quickly with pre-configured Astrolabe templates:
 | [Sphere Eversion](https://github.com/Xinze-Li-Bryan/astrolabe-template-sphere-eversion) | Proof of sphere eversion existence |
 | [Ramanujan-Nagell](https://github.com/Xinze-Li-Bryan/astrolabe-template-ramanujan-nagell) | Ramanujan-Nagell theorem formalization |
 
+
 ## Why Astrolabe?
 
 Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses your project, visualizes the dependency graph in 3D, and lets you explore it interactively—zoom, filter, trace paths, and understand structure at a glance.

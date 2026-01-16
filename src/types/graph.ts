@@ -18,6 +18,10 @@ export type NodeKind =
   | 'axiom'
   | 'conjecture'
   | 'example'
+  | 'structure'
+  | 'class'
+  | 'instance'
+  | 'inductive'
   | 'custom'  // Virtual node
 
 export type NodeStatus =

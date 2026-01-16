@@ -7,7 +7,7 @@
  * Note: This version uses Python backend API instead of Tauri invoke
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { loadProject, refreshProject, checkProjectStatus, type ProjectStatus } from '@/lib/api'
 import type { Node, Edge } from '@/types/node'
 import type {
@@ -18,17 +18,34 @@ import type {
   GraphLink,
 } from '@/types/graph'
 import { useFileWatch } from './useFileWatch'
+import {
+  processGraph,
+  type GraphFilterOptions,
+  DEFAULT_FILTER_OPTIONS,
+} from '@/lib/graphProcessing'
 
 // Re-export types for backward compatibility
 export type { GraphNode, GraphLink } from '@/types/graph'
+export type { GraphFilterOptions } from '@/lib/graphProcessing'
+export { DEFAULT_FILTER_OPTIONS } from '@/lib/graphProcessing'
 
 // Node types that require proof status halo (matches backend PROOF_REQUIRING_KINDS)
 const PROOF_REQUIRING_KINDS = ['theorem', 'lemma', 'proposition', 'corollary']
 
+export interface FilterStats {
+  removedNodes: number      // Technical nodes filtered out
+  virtualEdgesCreated: number  // Through-link edges created
+  orphanedNodes: number     // Nodes removed because they became disconnected
+}
+
 export interface GraphData {
-  // New types (internal use)
+  // New types (internal use) - these are PROCESSED (filtered)
   nodes: AstrolabeNode[]
   edges: AstrolabeEdge[]
+
+  // Raw data (unfiltered, for stats)
+  rawNodeCount: number
+  rawEdgeCount: number
 
   // Legacy compatibility (still used by page.tsx and Graph3D)
   legacyNodes: GraphNode[]
@@ -43,6 +60,11 @@ export interface GraphData {
   needsInit: boolean
   notSupported: boolean  // Not a Lean 4 Lake project
   recheckStatus: () => Promise<ProjectStatus | null | undefined>
+
+  // Filtering
+  filterOptions: GraphFilterOptions
+  setFilterOptions: (options: GraphFilterOptions) => void
+  filterStats: FilterStats  // Stats from graph processing
 }
 
 /**
@@ -103,10 +125,11 @@ function backendEdgeToAstrolabe(edge: Edge): AstrolabeEdge {
 }
 
 export function useGraphData(projectPath: string): GraphData {
-  const [nodes, setNodes] = useState<AstrolabeNode[]>([])
-  const [edges, setEdges] = useState<AstrolabeEdge[]>([])
+  const [rawNodes, setRawNodes] = useState<AstrolabeNode[]>([])
+  const [rawEdges, setRawEdges] = useState<AstrolabeEdge[]>([])
   const [loading, setLoading] = useState(false)
   const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null)
+  const [filterOptions, setFilterOptions] = useState<GraphFilterOptions>(DEFAULT_FILTER_OPTIONS)
   const loadedRef = useRef(false)
 
   // Check project status
@@ -146,8 +169,8 @@ export function useGraphData(projectPath: string): GraphData {
       const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
       const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
 
-      setNodes(astrolabeNodes)
-      setEdges(astrolabeEdges)
+      setRawNodes(astrolabeNodes)
+      setRawEdges(astrolabeEdges)
 
       console.log(`[useGraphData] Loaded ${astrolabeNodes.length} nodes and ${astrolabeEdges.length} edges from backend`)
 
@@ -164,8 +187,8 @@ export function useGraphData(projectPath: string): GraphData {
 
   const reload = useCallback(async () => {
     loadedRef.current = false
-    setNodes([])
-    setEdges([])
+    setRawNodes([])
+    setRawEdges([])
     setLoading(true)
 
     try {
@@ -177,8 +200,8 @@ export function useGraphData(projectPath: string): GraphData {
       const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
       const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
 
-      setNodes(astrolabeNodes)
-      setEdges(astrolabeEdges)
+      setRawNodes(astrolabeNodes)
+      setRawEdges(astrolabeEdges)
 
       console.log(`[useGraphData] Reloaded ${astrolabeNodes.length} nodes and ${astrolabeEdges.length} edges`)
     } catch (err) {
@@ -197,8 +220,8 @@ export function useGraphData(projectPath: string): GraphData {
       const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
       const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
 
-      setNodes(astrolabeNodes)
-      setEdges(astrolabeEdges)
+      setRawNodes(astrolabeNodes)
+      setRawEdges(astrolabeEdges)
 
       console.log(`[useGraphData] Meta refreshed: ${astrolabeNodes.length} nodes`)
     } catch (err) {
@@ -211,6 +234,25 @@ export function useGraphData(projectPath: string): GraphData {
     onRefresh: reload,       // .ilean changes → full reload
     onMetaRefresh: reloadMeta, // meta.json changes → only refresh meta
   })
+
+  // ============================================
+  // Apply graph processing (filtering + through-links)
+  // ============================================
+  const { nodes, edges, stats: filterStats } = useMemo(
+    () => {
+      const result = processGraph(rawNodes, rawEdges, filterOptions)
+      if (filterOptions.hideTechnical && (result.stats.removedNodes > 0 || result.stats.orphanedNodes > 0)) {
+        console.log(
+          `[processGraph] Filtered ${result.stats.removedNodes} technical nodes, ` +
+          `${result.stats.orphanedNodes} orphaned nodes, ` +
+          `created ${result.stats.virtualEdgesCreated} virtual edges. ` +
+          `Result: ${result.nodes.length} nodes, ${result.edges.length} edges`
+        )
+      }
+      return result
+    },
+    [rawNodes, rawEdges, filterOptions]
+  )
 
   // ============================================
   // Legacy compatibility: convert to old types
@@ -241,6 +283,8 @@ export function useGraphData(projectPath: string): GraphData {
   return {
     nodes,
     edges,
+    rawNodeCount: rawNodes.length,
+    rawEdgeCount: rawEdges.length,
     legacyNodes,
     links,
     loading,
@@ -250,5 +294,8 @@ export function useGraphData(projectPath: string): GraphData {
     needsInit: projectStatus?.needsInit ?? false,
     notSupported: projectStatus?.notSupported ?? false,
     recheckStatus,
+    filterOptions,
+    setFilterOptions,
+    filterStats,
   }
 }
