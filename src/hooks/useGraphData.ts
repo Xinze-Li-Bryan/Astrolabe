@@ -187,8 +187,8 @@ export function useGraphData(projectPath: string): GraphData {
 
   const reload = useCallback(async () => {
     loadedRef.current = false
-    setRawNodes([])
-    setRawEdges([])
+    // Don't clear nodes/edges to [] - this would trigger ForceGraph3D to clear all positions
+    // Just set loading state and let the new data replace the old
     setLoading(true)
 
     try {
