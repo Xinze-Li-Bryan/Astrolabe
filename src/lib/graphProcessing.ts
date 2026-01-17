@@ -569,9 +569,9 @@ export function calculateInterClusterRepulsion(
 
     if (dist < 0.1) continue // Avoid division by zero
 
-    // Repulsion force inversely proportional to distance
-    // Use a softer falloff for cluster separation
-    const force = strength / (dist * dist + 1)
+    // Repulsion force - stronger and with slower falloff for better separation
+    // Scale by 50 to make the slider more responsive
+    const force = (strength * 50) / (dist + 0.5)
 
     fx += (dx / dist) * force
     fy += (dy / dist) * force
