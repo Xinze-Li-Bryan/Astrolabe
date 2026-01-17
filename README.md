@@ -21,12 +21,6 @@ To achieve this, we need everyone's contribution. Use AI-assisted coding to brin
 
 Open an issue or submit a PR.
 
-## Acknowledgments
-
-Thanks to the following individuals for inspiration, valuable discussions, feedback, and collaboration:
-
-Alejandro Radisic, Alex Kontorovich, Bin Dong, Kasra Rafi, Kevin Buzzard, Leonardo de Moura, Luis Seco, Patrick Massot, Pietro Monticone, Terence Tao, Vijay Ganesh, Wojciech Nawrocki, Yevgeny Liokumovich
-
 ---
 
 ## What is Astrolabe?
