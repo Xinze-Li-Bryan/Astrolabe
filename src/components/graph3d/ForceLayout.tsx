@@ -18,6 +18,7 @@ import {
   groupNodesByNamespace,
   computeClusterCentroids,
   calculateClusterForce,
+  calculateInterClusterRepulsion,
   calculateNodeDegrees,
   calculateAdaptiveSpringLength,
   type NamespaceGroups,
@@ -36,6 +37,7 @@ export interface PhysicsParams {
   // Namespace clustering
   clusteringEnabled: boolean        // Enable namespace-based clustering (default false)
   clusteringStrength: number        // Force pulling nodes toward cluster centroid (default 0.3)
+  clusterSeparation: number         // Force pushing different clusters apart (default 0.5)
   clusteringDepth: number           // Namespace depth for clustering (default 1)
   // Density-adaptive edge length
   adaptiveSpringEnabled: boolean    // Enable density-adaptive spring length (default false)
@@ -53,6 +55,7 @@ export const DEFAULT_PHYSICS: PhysicsParams = {
   // Namespace clustering defaults
   clusteringEnabled: true,
   clusteringStrength: 0.2,   // Reduced from 0.3 for less tight clusters
+  clusterSeparation: 0.5,    // Push different clusters apart
   clusteringDepth: 1,
   // Density-adaptive defaults
   adaptiveSpringEnabled: true,
@@ -207,15 +210,29 @@ function simulateStep(
         if (!pos || !f) continue
 
         const nodePos: Vec3 = { x: pos[0], y: pos[1], z: pos[2] }
+
+        // Attraction to own cluster centroid
         const clusterForce = calculateClusterForce(
           nodePos,
           centroid,
           physics.clusteringStrength
         )
-
         f[0] += clusterForce.x
         f[1] += clusterForce.y
         f[2] += clusterForce.z
+
+        // Repulsion from other cluster centroids
+        if ((physics.clusterSeparation ?? 0) > 0) {
+          const separationForce = calculateInterClusterRepulsion(
+            nodePos,
+            namespace,
+            centroids,
+            physics.clusterSeparation ?? 0.5
+          )
+          f[0] += separationForce.x
+          f[1] += separationForce.y
+          f[2] += separationForce.z
+        }
       }
     }
   }
@@ -696,15 +713,29 @@ export function ForceLayout({
           if (!pos || !f) continue
 
           const nodePos: Vec3 = { x: pos[0], y: pos[1], z: pos[2] }
+
+          // Attraction to own cluster centroid
           const clusterForce = calculateClusterForce(
             nodePos,
             centroid,
             physics.clusteringStrength
           )
-
           f[0] += clusterForce.x
           f[1] += clusterForce.y
           f[2] += clusterForce.z
+
+          // Repulsion from other cluster centroids
+          if ((physics.clusterSeparation ?? 0) > 0) {
+            const separationForce = calculateInterClusterRepulsion(
+              nodePos,
+              namespace,
+              centroids,
+              physics.clusterSeparation
+            )
+            f[0] += separationForce.x
+            f[1] += separationForce.y
+            f[2] += separationForce.z
+          }
         }
       }
     }
