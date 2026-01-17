@@ -1,6 +1,6 @@
 # Astrolabe
 
-**Astrolabe is an open-source project that turns our collective vision for the future of mathematical interaction into reality. It belongs to everyone.**
+**Astrolabe is a growing open-source project that turns our collective vision for the future of mathematical interaction into reality. It belongs to everyone.**
 
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
 [![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/watch?v=WJrw47W3OG0&list=PLSsZwlCw9byduhRCHDBPe1gt4WH46aixb)
@@ -30,6 +30,10 @@ Open an issue or submit a PR.
 </p>
 
 Astrolabe transforms your Lean 4 codebase into an explorable 3D universe. It parses theorems, lemmas, definitions, and their dependencies, presenting them as an interactive force-directed graph.
+
+**Current features:** 3D visualization, dependency exploration, search & filtering, canvas management, code editor, markdown notes.
+
+**Coming soon:** AI integration, LSP diagnostics, 2D view, more interaction modes.
 
 ## Templates
 
