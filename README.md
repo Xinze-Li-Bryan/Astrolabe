@@ -1,9 +1,43 @@
 # Astrolabe
 
-**Interactive 3D Dependency Graph Visualization for Lean 4 Formalization Projects**
+**Astrolabe is an open-source project that turns our collective vision for the future of mathematical interaction into reality. It belongs to everyone.**
 
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
 [![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/watch?v=WJrw47W3OG0&list=PLSsZwlCw9byduhRCHDBPe1gt4WH46aixb)
+
+## Mission
+
+We're creating opportunities for mathematicians, formalizers, developers, artists, philosophers of technology, and anyone curious about the future of mathematics — to explore what mathematical collaboration looks like in the age of AI, and to make formalization more accessible, enjoyable, and creative.
+
+This includes:
+- Customizable frameworks for new modes of mathematical activity
+- AI-assisted reasoning and automated formalization
+- Dynamic knowledge graphs generated from mathematical papers
+- New interaction paradigms that spark broader interest in formal mathematics
+
+## Contributing
+
+To achieve this, we need everyone's contribution. Use AI-assisted coding to bring your ideas to life — we'll coordinate the engineering team to help implement and integrate them.
+
+Open an issue or submit a PR.
+
+## Supported By
+
+- University of Toronto, Department of Mathematics
+- Fields Institute Centre for Mathematical AI
+- RiskLab
+- OpenMath Foundation (CertiK)
+- Feishu China
+
+## Acknowledgments
+
+Thanks to the following individuals for inspiration, valuable discussions, feedback, and collaboration:
+
+Leonardo de Moura, Kevin Buzzard, Terence Tao, Patrick Massot, Alex Kontorovich, Pietro Monticone, Wojciech Nawrocki, Alejandro Radisic, Bin Dong, Luis Seco, Kasra Rafi, Vijay Ganesh
+
+---
+
+## What is Astrolabe?
 
 <p align="center">
   <img src="docs/images/screenshot-1.jpg" width="80%" />
@@ -21,7 +55,6 @@ Get started quickly with pre-configured Astrolabe templates:
 | [Sphere Eversion](https://github.com/Xinze-Li-Bryan/astrolabe-template-sphere-eversion) | Proof of sphere eversion existence |
 | [Ramanujan-Nagell](https://github.com/Xinze-Li-Bryan/astrolabe-template-ramanujan-nagell) | Ramanujan-Nagell theorem formalization |
 
-
 ## Why Astrolabe?
 
 Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses your project, visualizes the dependency graph in 3D, and lets you explore it interactively—zoom, filter, trace paths, and understand structure at a glance.
@@ -30,9 +63,16 @@ Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses
 
 ### 3D Force-Directed Graph
 - **Physics-Based Layout** — Nodes naturally organize by their connections
+- **Namespace Clustering** — Group nodes by Lean namespace with adjustable compactness and separation
+- **Density-Adaptive Springs** — High-degree hub nodes get longer edges to prevent star-shaped clustering
 - **Interactive Camera** — Orbit, zoom, pan; auto-focus on selected nodes
 - **Geometric Node Shapes** — Theorems (spheres), lemmas (tetrahedrons), definitions (boxes), axioms (icosahedrons)
 - **Multiple Edge Styles** — Solid, dashed, dotted, polyline, spring, wavy, zigzag
+
+### Graph Simplification
+- **Transitive Reduction** — Hide redundant edges (if A→B→C exists, hide A→C)
+- **Hide Technical** — Filter out internal/technical declarations
+- **Hide Orphaned** — Remove nodes with no connections
 
 ### Lean Integration
 - **Auto-Parsing** — Reads `.ilean` compilation cache for fast extraction
@@ -41,9 +81,10 @@ Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses
 
 ### Search & Navigation
 - **Fuzzy Search** — Find declarations by name
-- **Browse Modes** — Sort by A-Z, popularity, link count, or proof depth
+- **Namespace Browser** — Hierarchical A-Z → Namespace → Type grouping with depth selector
+- **Popularity Mode** — Browse by usage count (Hot/Common/Rare/Unused)
 - **Dependency Explorer** — View what a theorem uses and what uses it
-- **Quick Add** — One-click to add nodes to the canvas
+- **Auto-Expand** — Click a node on canvas to jump to it in the search panel
 
 ### Canvas Management
 - **Focused Subgraphs** — Display only the nodes you care about
@@ -139,15 +180,19 @@ astrolabe/
 │   ├── components/
 │   │   ├── graph3d/              # 3D visualization
 │   │   │   ├── ForceGraph3D.tsx  # Main graph container
+│   │   │   ├── ForceLayout.tsx   # Physics simulation
 │   │   │   ├── Node3D.tsx        # Node rendering
 │   │   │   ├── Edge3D.tsx        # Edge rendering
 │   │   │   └── effects/          # StatusRing, FlowPulse
-│   │   ├── SearchPanel.tsx       # Search & browse
+│   │   ├── SearchPanel.tsx       # Search & namespace browser
 │   │   ├── MonacoLeanEditor.tsx  # Code editor
 │   │   ├── LeanCodePanel.tsx     # Code panel wrapper
 │   │   └── MarkdownRenderer.tsx  # Notes with math
 │   ├── hooks/                    # useGraphData, useFileWatch, useProject
-│   ├── lib/                      # Stores, API client, utilities
+│   ├── lib/
+│   │   ├── graphProcessing.ts    # Transitive reduction, clustering, filtering
+│   │   ├── canvasStore.ts        # Canvas state management
+│   │   └── store.ts              # Global state
 │   └── types/                    # TypeScript types
 │
 ├── backend/astrolabe/            # Backend (FastAPI)
@@ -165,12 +210,6 @@ astrolabe/
 │   ├── tauri.conf.json           # Tauri configuration
 │   └── binaries/                 # Packaged backend binary
 │
-├── assets/                       # Visual assets
-│   ├── nodes/                    # Node shape components
-│   ├── edges/                    # Edge style components
-│   ├── effects/                  # Visual effects
-│   └── themes/                   # Color themes
-│
 └── scripts/
     └── build-backend.sh          # PyInstaller build script
 ```
@@ -183,7 +222,6 @@ Astrolabe stores project-specific data in `.astrolabe/` within each Lean project
 |------|---------|
 | `meta.json` | Node/edge customizations, notes, virtual nodes |
 | `graph.json` | Parsed declaration cache |
-| `canvas.json` | Visible nodes, 3D positions, camera state |
 
 ## API Reference
 
@@ -206,10 +244,6 @@ Astrolabe stores project-specific data in `.astrolabe/` within each Lean project
 | Mouse drag | Rotate camera |
 | Scroll | Zoom |
 | Right-click drag | Pan |
-
-## Contributing
-
-Contributions welcome! Please open an issue first to discuss what you'd like to change.
 
 ## License
 
