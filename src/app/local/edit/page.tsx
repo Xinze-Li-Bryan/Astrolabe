@@ -113,6 +113,7 @@ function LocalEditorContent() {
     const [isTauri, setIsTauri] = useState(false)
     const [infoPanelOpen, setInfoPanelOpen] = useState(true) // Node Info panel
     const [searchPanelOpen, setSearchPanelOpen] = useState(true) // Left search panel
+    const [searchPanelKey, setSearchPanelKey] = useState(0) // Key to reset SearchPanel state
     const [viewMode, setViewMode] = useState<ViewMode>('3d') // Default 3D view
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
@@ -1193,6 +1194,7 @@ function LocalEditorContent() {
                         <>
                             <Panel defaultSize={15} minSize={10} maxSize={30}>
                                 <SearchPanel
+                                    key={searchPanelKey}
                                     className="h-full"
                                     selectedNodeId={selectedNode?.id}
                                     onNodeSelect={handleSearchResultSelect}
@@ -1285,6 +1287,7 @@ function LocalEditorContent() {
                                     onClick={() => {
                                         console.log('[Canvas] Refresh clicked')
                                         reloadGraph()
+                                        setSearchPanelKey(k => k + 1) // Reset SearchPanel state
                                     }}
                                     disabled={graphLoading}
                                     className="p-1.5 bg-black/60 hover:bg-white/20 rounded transition-colors disabled:opacity-50"
