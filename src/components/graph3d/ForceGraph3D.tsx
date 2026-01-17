@@ -196,14 +196,37 @@ function CameraInitializer({
   controlsRef: React.RefObject<any>
 }) {
   const { camera } = useThree()
-  const initialized = useRef(false)
+  const lastAppliedPosition = useRef<[number, number, number] | null>(null)
+  const lastAppliedTarget = useRef<[number, number, number] | null>(null)
+
+  const isSameVec3 = (
+    a: [number, number, number] | null | undefined,
+    b: [number, number, number] | null | undefined
+  ) => {
+    if (!a || !b) return false
+    return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
+  }
 
   useEffect(() => {
-    if (initialized.current || !controlsRef.current) return
-    if (initialPosition) camera.position.set(...initialPosition)
-    if (initialTarget) controlsRef.current.target.set(...initialTarget)
-    controlsRef.current.update()
-    initialized.current = true
+    if (!controlsRef.current) return
+
+    let didApply = false
+
+    if (initialPosition && !isSameVec3(initialPosition, lastAppliedPosition.current)) {
+      camera.position.set(...initialPosition)
+      lastAppliedPosition.current = [...initialPosition]
+      didApply = true
+    }
+
+    if (initialTarget && !isSameVec3(initialTarget, lastAppliedTarget.current)) {
+      controlsRef.current.target.set(...initialTarget)
+      lastAppliedTarget.current = [...initialTarget]
+      didApply = true
+    }
+
+    if (didApply) {
+      controlsRef.current.update()
+    }
   }, [camera, controlsRef, initialPosition, initialTarget])
 
   return null
@@ -213,21 +236,35 @@ function CameraInitializer({
 function CameraSaver({
   controlsRef,
   onCameraChange,
+  onUserInteractionStart,
 }: {
   controlsRef: React.RefObject<any>
   onCameraChange?: (position: [number, number, number], target: [number, number, number]) => void
+  onUserInteractionStart?: () => void
 }) {
   const { camera } = useThree()
   const pendingSave = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedPos = useRef<[number, number, number]>([0, 0, 0])
   const lastSavedTarget = useRef<[number, number, number]>([0, 0, 0])
+  const userInteracting = useRef(false)
 
   useEffect(() => {
     if (!controlsRef.current || !onCameraChange) return
 
     const controls = controlsRef.current
 
+    const handleStart = () => {
+      userInteracting.current = true
+      onUserInteractionStart?.()
+    }
+
+    const handleEnd = () => {
+      userInteracting.current = false
+    }
+
     const handleChange = () => {
+      if (!userInteracting.current) return
+
       // Clear previous pending save
       if (pendingSave.current) {
         clearTimeout(pendingSave.current)
@@ -254,15 +291,76 @@ function CameraSaver({
       }, 1000) // Save after 1 second of user inactivity
     }
 
+    controls.addEventListener('start', handleStart)
+    controls.addEventListener('end', handleEnd)
     controls.addEventListener('change', handleChange)
 
     return () => {
+      controls.removeEventListener('start', handleStart)
+      controls.removeEventListener('end', handleEnd)
       controls.removeEventListener('change', handleChange)
       if (pendingSave.current) {
         clearTimeout(pendingSave.current)
       }
     }
-  }, [camera, controlsRef, onCameraChange])
+  }, [camera, controlsRef, onCameraChange, onUserInteractionStart])
+
+  return null
+}
+
+// Auto-center camera on the graph when layout stabilizes (unless user moved camera)
+function CameraAutoCenter({
+  positionsRef,
+  controlsRef,
+  enabled,
+  layoutStableTick,
+  hasUserInteractedRef,
+  cameraInitKey,
+  positionsCount,
+}: {
+  positionsRef: React.MutableRefObject<Map<string, [number, number, number]>>
+  controlsRef: React.RefObject<any>
+  enabled: boolean
+  layoutStableTick: number
+  hasUserInteractedRef: React.MutableRefObject<boolean>
+  cameraInitKey: string
+  positionsCount: number
+}) {
+  const { camera } = useThree()
+  const lastCenterKey = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    if (hasUserInteractedRef.current) return
+    if (!controlsRef.current) return
+    if (positionsRef.current.size === 0) return
+
+    const centerKey = `${layoutStableTick}:${cameraInitKey}:${positionsCount}`
+    if (lastCenterKey.current === centerKey) return
+
+    let cx = 0, cy = 0, cz = 0
+    for (const pos of positionsRef.current.values()) {
+      cx += pos[0]
+      cy += pos[1]
+      cz += pos[2]
+    }
+    cx /= positionsRef.current.size
+    cy /= positionsRef.current.size
+    cz /= positionsRef.current.size
+
+    const target = controlsRef.current.target
+    const center = new THREE.Vector3(cx, cy, cz)
+    const offset = new THREE.Vector3().subVectors(camera.position, target)
+    const distance = target.distanceTo(center)
+
+    if (distance > 0.001) {
+      controlsRef.current.target.copy(center)
+      camera.position.copy(center.clone().add(offset))
+      controlsRef.current.update()
+    }
+
+    lastCenterKey.current = centerKey
+  }, [camera, controlsRef, enabled, layoutStableTick, hasUserInteractedRef, positionsRef, cameraInitKey, positionsCount])
 
   return null
 }
@@ -287,6 +385,9 @@ function GraphScene({
   isRemovingNodes = false,
   savedPositionCount = 0,
   onStable,
+  layoutStableTick,
+  layoutReady,
+  onWarmupComplete,
 }: {
   nodes: Node[]
   edges: Edge[]
@@ -306,6 +407,9 @@ function GraphScene({
   isRemovingNodes?: boolean
   savedPositionCount?: number
   onStable?: () => void
+  layoutStableTick: number
+  layoutReady: boolean
+  onWarmupComplete?: () => void
 }) {
   // Node focus
   const focusPosition = focusNodeId ? positionsRef.current.get(focusNodeId) || null : null
@@ -334,6 +438,13 @@ function GraphScene({
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null)
   const controlsRef = useRef<any>(null)
+  const hasUserInteractedRef = useRef(false)
+  const shouldAutoCenter = !focusNodeId && !focusEdgeId
+  const cameraInitKey = `${initialCameraPosition?.join(',') ?? ''}|${initialCameraTarget?.join(',') ?? ''}`
+  const handleUserInteractionStart = useCallback(() => {
+    hasUserInteractedRef.current = true
+  }, [])
+  const positionsCount = positionsRef.current.size
 
   // Calculate related edges
   const relatedEdges = useMemo(() => {
@@ -405,9 +516,11 @@ function GraphScene({
         physics={physics}
         savedPositionCount={savedPositionCount}
         onStable={onStable}
+        onWarmupComplete={onWarmupComplete}
+        controlsRef={controlsRef}
       />
 
-      {edges.map(edge => {
+      {layoutReady && edges.map(edge => {
         if (!positionsRef.current.has(edge.source) || !positionsRef.current.has(edge.target)) return null
         const isInput = relatedEdges.inputs.has(edge.id)
         const isOutput = relatedEdges.outputs.has(edge.id)
@@ -431,7 +544,7 @@ function GraphScene({
         )
       })}
 
-      {nodes.map(node => {
+      {layoutReady && nodes.map(node => {
         if (!positionsRef.current.has(node.id)) return null
         const isDimmedByEdge = highlightedEdge !== null && node.id !== highlightedEdge.source && node.id !== highlightedEdge.target
         const isEdgeEndpoint = highlightedEdge !== null && (node.id === highlightedEdge.source || node.id === highlightedEdge.target)
@@ -456,7 +569,16 @@ function GraphScene({
         )
       })}
 
-      <OrbitControls ref={controlsRef} enablePan enableZoom enableRotate minDistance={5} maxDistance={100} />
+      <OrbitControls
+        ref={controlsRef}
+        enablePan
+        enableZoom
+        enableRotate
+        minDistance={5}
+        maxDistance={100}
+        zoomSpeed={0.5}
+        rotateSpeed={0.5}
+      />
       <CameraController targetPosition={focusPosition} enabled={shouldFocusNode} controlsRef={controlsRef} />
       <EdgeCameraController
         sourcePosition={edgeFocusPositions.source}
@@ -465,7 +587,20 @@ function GraphScene({
         controlsRef={controlsRef}
       />
       <CameraInitializer initialPosition={initialCameraPosition} initialTarget={initialCameraTarget} controlsRef={controlsRef} />
-      <CameraSaver controlsRef={controlsRef} onCameraChange={onCameraChange} />
+      <CameraSaver
+        controlsRef={controlsRef}
+        onCameraChange={onCameraChange}
+        onUserInteractionStart={handleUserInteractionStart}
+      />
+      <CameraAutoCenter
+        positionsRef={positionsRef}
+        controlsRef={controlsRef}
+        enabled={shouldAutoCenter}
+        layoutStableTick={layoutStableTick}
+        hasUserInteractedRef={hasUserInteractedRef}
+        cameraInitKey={cameraInitKey}
+        positionsCount={positionsCount}
+      />
     </>
   )
 }
@@ -490,6 +625,9 @@ export function ForceGraph3D({
   isRemovingNodes = false,
 }: ForceGraph3DProps) {
   const positionsRef = useRef<Map<string, [number, number, number]>>(new Map())
+  const [layoutStableTick, setLayoutStableTick] = useState(0)
+  const [layoutReady, setLayoutReady] = useState(false)
+  const hasShownLayout = useRef(false)
 
   // Convert customNodes to Node type
   const customNodesAsNodes: Node[] = useMemo(() => {
@@ -626,7 +764,22 @@ export function ForceGraph3D({
     }
     console.log('[ForceGraph3D] Simulation stable, saving', Object.keys(positions).length, 'positions')
     updatePositions(positions)
+    setLayoutStableTick((current) => current + 1)
   }, [updatePositions])
+
+  const handleWarmupComplete = useCallback(() => {
+    if (!hasShownLayout.current) {
+      hasShownLayout.current = true
+      setLayoutReady(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (allNodes.length === 0) {
+      hasShownLayout.current = false
+      setLayoutReady(false)
+    }
+  }, [allNodes.length])
 
   if (allNodes.length === 0) {
     return (
@@ -638,7 +791,7 @@ export function ForceGraph3D({
 
   return (
     <div className="w-full h-full bg-[#0a0a0f]">
-      <Canvas camera={{ position: [0, 0, 20], fov: 60 }} onPointerMissed={() => handleNodeSelect(null)}>
+      <Canvas camera={{ position: [0, 0, 30], fov: 60 }} onPointerMissed={() => handleNodeSelect(null)}>
         <GraphScene
           nodes={allNodes}
           edges={allEdges}
@@ -658,6 +811,9 @@ export function ForceGraph3D({
           isRemovingNodes={isRemovingNodes}
           savedPositionCount={savedPositionCount}
           onStable={handleStable}
+          layoutStableTick={layoutStableTick}
+          layoutReady={layoutReady}
+          onWarmupComplete={handleWarmupComplete}
         />
       </Canvas>
       <div className="absolute bottom-4 left-4 text-xs text-white/40 font-mono bg-black/60 px-2 py-1 rounded">

@@ -62,6 +62,28 @@ def _load_theme_defaults():
 # Load theme configuration
 NODE_STYLE_DEFAULTS, EDGE_STYLE_DEFAULTS = _load_theme_defaults()
 
+# Fallback theme values (kept in sync with assets/themes/default.json)
+FALLBACK_NODE_STYLE_DEFAULTS = {
+    "theorem": {"color": "#A855F7", "size": 1.2, "shape": "sphere"},
+    "lemma": {"color": "#6366F1", "size": 0.7, "shape": "tetrahedron"},
+    "definition": {"color": "#FBBF24", "size": 1.0, "shape": "box"},
+    "axiom": {"color": "#FB923C", "size": 1.1, "shape": "icosahedron"},
+    "structure": {"color": "#2DD4BF", "size": 1.0, "shape": "torus"},
+    "class": {"color": "#4ADE80", "size": 1.0, "shape": "torusKnot"},
+    "instance": {"color": "#38BDF8", "size": 0.9, "shape": "capsule"},
+    "inductive": {"color": "#F472B6", "size": 1.0, "shape": "dodecahedron"},
+    "example": {"color": "#818CF8", "size": 0.8, "shape": "cylinder"},
+    "default": {"color": "#A1A1AA", "size": 1.0, "shape": "ring"},
+}
+
+# If theme loading fails, use fallback defaults
+if not NODE_STYLE_DEFAULTS:
+    NODE_STYLE_DEFAULTS = FALLBACK_NODE_STYLE_DEFAULTS.copy()
+else:
+    # Ensure required kinds always have defaults even if theme is partial
+    for kind, defaults in FALLBACK_NODE_STYLE_DEFAULTS.items():
+        NODE_STYLE_DEFAULTS.setdefault(kind, defaults)
+
 # If theme loading fails, use minimal fallback
 if not EDGE_STYLE_DEFAULTS:
     EDGE_STYLE_DEFAULTS = {
@@ -71,6 +93,18 @@ if not EDGE_STYLE_DEFAULTS:
 
 DEFAULT_NODE_STYLE = {"color": "#888888", "size": 1.0, "shape": "sphere"}
 DEFAULT_EDGE_STYLE = {"color": "#2ecc71", "width": 1.0, "style": "solid"}  # Green
+
+
+def _normalize_kind_for_style(kind: str) -> str:
+    """Normalize kind strings for theme lookup."""
+    if not kind:
+        return ""
+    kind_key = kind.lower()
+    if kind_key in {"def", "definition", "abbrev", "opaque"}:
+        return "definition"
+    if kind_key in {"prop", "proposition", "corollary"}:
+        return "theorem"
+    return kind_key
 
 
 class Project:
@@ -262,7 +296,8 @@ class Project:
         """Set default styles for all nodes and edges"""
         # Node default styles (by kind)
         for node in self.nodes.values():
-            defaults = NODE_STYLE_DEFAULTS.get(node.kind, DEFAULT_NODE_STYLE)
+            kind_key = _normalize_kind_for_style(node.kind)
+            defaults = NODE_STYLE_DEFAULTS.get(kind_key, NODE_STYLE_DEFAULTS.get("default", DEFAULT_NODE_STYLE))
             node.default_color = defaults["color"]
             node.default_size = defaults["size"]
             node.default_shape = defaults["shape"]

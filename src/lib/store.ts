@@ -123,6 +123,11 @@ export const KIND_COLORS: Record<string, string> = {
   theorem: '#A855F7',
   lemma: '#6366F1',
   definition: '#FBBF24',
+  def: '#FBBF24',
+  abbrev: '#FBBF24',
+  opaque: '#FBBF24',
+  proposition: '#A855F7',
+  corollary: '#A855F7',
   axiom: '#FB923C',
   structure: '#2DD4BF',
   class: '#4ADE80',
@@ -142,7 +147,14 @@ export const STATUS_COLORS: Record<string, string> = {
 
 export function getNodeColor(node: Node): string {
   // Priority: backend default style > local KIND_COLORS fallback (user color override removed)
-  return node.defaultColor || KIND_COLORS[node.kind.toLowerCase()] || KIND_COLORS.unknown
+  const kindKey = node.kind.toLowerCase()
+  const kindColor = KIND_COLORS[kindKey]
+  if (node.defaultColor) {
+    if (node.defaultColor !== '#888888' || !kindColor) {
+      return node.defaultColor
+    }
+  }
+  return kindColor || KIND_COLORS.unknown
 }
 
 export function getStatusColor(status: string): string {

@@ -233,7 +233,8 @@ describe('Lean 4 Pattern Integration Tests', () => {
     })
 
     it('should create through-links for apply_one/apply_mul to instance dependencies', () => {
-      const result = processGraph(nodes, edges, { hideTechnical: true, hideOrphaned: false })
+      // Disable transitive reduction to verify through-links are created
+      const result = processGraph(nodes, edges, { hideTechnical: true, hideOrphaned: false, transitiveReduction: false })
 
       // instMulAction depends ON: apply, klein, hexagram
       // apply_one -> instMulAction, so through-links: apply_one -> apply, klein, hexagram
