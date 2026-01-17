@@ -19,6 +19,8 @@ This includes:
 
 To achieve this, we need everyone's contribution. Use AI-assisted coding to bring your ideas to life — we'll coordinate the engineering team to help implement and integrate them.
 
+Not sure where to start? Just feed this entire README to your favorite AI and ask it to help you contribute.
+
 Open an issue or submit a PR.
 
 ---
