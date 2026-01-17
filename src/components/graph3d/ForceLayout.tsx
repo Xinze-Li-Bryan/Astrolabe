@@ -49,7 +49,7 @@ export const DEFAULT_PHYSICS: PhysicsParams = {
   springLength: 6,           // Increased from 4 for less cluttered layout
   springStrength: 1.5,       // Slightly reduced for more relaxed springs
   centerStrength: 0.3,       // Reduced to allow more spread
-  damping: 0.85,
+  damping: 0.7,
   // Namespace clustering defaults
   clusteringEnabled: true,
   clusteringStrength: 0.2,   // Reduced from 0.3 for less tight clusters

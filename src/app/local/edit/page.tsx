@@ -14,7 +14,6 @@ import {
     PencilSquareIcon,
     PlusIcon,
     ArrowPathIcon,
-    FunnelIcon,
     Cog6ToothIcon,
     EyeIcon,
     EyeSlashIcon,
@@ -26,6 +25,7 @@ import {
     DocumentTextIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
+import { getNamespaceDepthPreview } from '@/lib/graphProcessing'
 import { UIColors } from '@/lib/colors'
 import { PROOF_STATUS_CONFIG, type ProofStatusType } from '@/lib/proofStatus'
 import type { NodeKind, NodeStatus, AstrolabeNode, AstrolabeEdge } from '@/types/graph'
@@ -227,6 +227,11 @@ function LocalEditorContent() {
             }
         }
         return colors
+    }, [astrolabeNodes])
+
+    // Namespace depth preview for clustering UI
+    const namespaceDepthPreview = useMemo(() => {
+        return getNamespaceDepthPreview(astrolabeNodes, 5)
     }, [astrolabeNodes])
 
     // Status colors - from unified proof status config (memoized for performance)
@@ -1340,24 +1345,6 @@ function LocalEditorContent() {
                                     </button>
                                 )}
 
-                                {/* Hide Technical Nodes toggle */}
-                                <button
-                                    onClick={() => setFilterOptions({
-                                        ...filterOptions,
-                                        hideTechnical: !filterOptions.hideTechnical
-                                    })}
-                                    className={`p-1.5 rounded transition-colors ${
-                                        filterOptions.hideTechnical
-                                            ? 'bg-yellow-500/30 text-yellow-400'
-                                            : 'bg-black/60 text-white/60 hover:text-white hover:bg-white/20'
-                                    }`}
-                                    title={filterOptions.hideTechnical
-                                        ? 'Show Implementation Details'
-                                        : 'Hide Implementation Details (instances, coercions, etc.)'}
-                                >
-                                    <FunnelIcon className="w-4 h-4" />
-                                </button>
-
                                 {/* In-canvas find button - TODO: backend to be developed
                                 <button
                                     onClick={() => {
@@ -1418,9 +1405,10 @@ function LocalEditorContent() {
 
                             {/* 物理设置面板 */}
                             {showPhysicsPanel && viewMode === '3d' && (
-                                <div className="absolute top-14 left-3 z-10 bg-black/80 backdrop-blur-sm border border-white/20 rounded-lg p-4 w-64">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-sm font-medium text-white">Physics Settings</h3>
+                                <div className="absolute top-14 left-3 z-10 bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg w-72 max-h-[80vh] overflow-y-auto">
+                                    {/* Header */}
+                                    <div className="flex items-center justify-between p-3 border-b border-white/10 sticky top-0 bg-black/90 backdrop-blur-sm">
+                                        <h3 className="text-sm font-medium text-white">Graph Settings</h3>
                                         <button
                                             onClick={() => setShowPhysicsPanel(false)}
                                             className="text-white/40 hover:text-white"
@@ -1429,99 +1417,217 @@ function LocalEditorContent() {
                                         </button>
                                     </div>
 
-                                    <div className="space-y-4">
-                                        {/* Repulsion Strength */}
+                                    <div className="p-3 space-y-4">
+                                        {/* === GRAPH SIMPLIFICATION === */}
                                         <div>
-                                            <label className="text-xs text-white/60 flex justify-between mb-1">
-                                                <span>Repulsion</span>
-                                                <span className="text-white/80">{physics.repulsionStrength}</span>
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="10"
-                                                max="500"
-                                                step="10"
-                                                value={physics.repulsionStrength}
-                                                onChange={(e) => setPhysics(p => ({ ...p, repulsionStrength: Number(e.target.value) }))}
-                                                className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                            />
+                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Graph Simplification</h4>
+                                            <div className="space-y-2">
+                                                <label className="text-xs text-white/80 flex items-center gap-2 cursor-pointer hover:text-white">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={filterOptions.hideTechnical}
+                                                        onChange={(e) => setFilterOptions({ ...filterOptions, hideTechnical: e.target.checked })}
+                                                        className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                    />
+                                                    <span>Hide Technical</span>
+                                                    <span className="text-[10px] text-white/40 ml-auto">instances, coercions</span>
+                                                </label>
+                                                <label className="text-xs text-white/80 flex items-center gap-2 cursor-pointer hover:text-white">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={filterOptions.transitiveReduction ?? true}
+                                                        onChange={(e) => setFilterOptions({ ...filterOptions, transitiveReduction: e.target.checked })}
+                                                        className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                    />
+                                                    <span>Transitive Reduction</span>
+                                                    <span className="text-[10px] text-white/40 ml-auto">hide A→C if A→B→C</span>
+                                                </label>
+                                            </div>
                                         </div>
 
-                                        {/* Spring Length */}
-                                        <div>
-                                            <label className="text-xs text-white/60 flex justify-between mb-1">
-                                                <span>Spring Length</span>
-                                                <span className="text-white/80">{physics.springLength}</span>
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="1"
-                                                max="20"
-                                                step="0.5"
-                                                value={physics.springLength}
-                                                onChange={(e) => setPhysics(p => ({ ...p, springLength: Number(e.target.value) }))}
-                                                className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                            />
+                                        {/* === LAYOUT OPTIMIZATION === */}
+                                        <div className="border-t border-white/10 pt-3">
+                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Layout Optimization</h4>
+
+                                            {/* Namespace Clustering */}
+                                            <div className="mb-3">
+                                                <label className="text-xs text-white/80 flex items-center gap-2 cursor-pointer hover:text-white">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={physics.clusteringEnabled}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, clusteringEnabled: e.target.checked }))}
+                                                        className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                    />
+                                                    <span>Namespace Clustering</span>
+                                                </label>
+                                                {physics.clusteringEnabled && (
+                                                    <div className="mt-2 ml-5 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] text-white/40 w-12">Strength</span>
+                                                            <input
+                                                                type="range"
+                                                                min="0"
+                                                                max="10"
+                                                                step="0.5"
+                                                                value={physics.clusteringStrength}
+                                                                onChange={(e) => setPhysics(p => ({ ...p, clusteringStrength: Number(e.target.value) }))}
+                                                                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                            />
+                                                            <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[10px] text-white/40 mb-1 block">Depth</label>
+                                                            <select
+                                                                value={physics.clusteringDepth}
+                                                                onChange={(e) => setPhysics(p => ({ ...p, clusteringDepth: Number(e.target.value) }))}
+                                                                className="w-full text-[10px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white/80"
+                                                            >
+                                                                {namespaceDepthPreview.map(info => (
+                                                                    <option key={info.depth} value={info.depth}>
+                                                                        Depth {info.depth}: {info.namespaces.slice(0, 3).join(', ')}
+                                                                        {info.namespaces.length > 3 ? ` +${info.namespaces.length - 3} more` : ''}
+                                                                        {' '}({info.count} groups)
+                                                                    </option>
+                                                                ))}
+                                                                {namespaceDepthPreview.length === 0 && (
+                                                                    <option value={1}>No namespaces found</option>
+                                                                )}
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Adaptive Springs */}
+                                            <div>
+                                                <label className="text-xs text-white/80 flex items-center gap-2 cursor-pointer hover:text-white">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={physics.adaptiveSpringEnabled}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringEnabled: e.target.checked }))}
+                                                        className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                    />
+                                                    <span>Adaptive Springs</span>
+                                                    <span className="text-[10px] text-white/40 ml-auto">spread hubs</span>
+                                                </label>
+                                                {physics.adaptiveSpringEnabled && (
+                                                    <div className="mt-2 ml-5 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] text-white/40 w-12">Mode</span>
+                                                            <select
+                                                                value={physics.adaptiveSpringMode}
+                                                                onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' }))}
+                                                                className="flex-1 text-[10px] bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80"
+                                                            >
+                                                                <option value="sqrt">Square Root</option>
+                                                                <option value="logarithmic">Logarithmic</option>
+                                                                <option value="linear">Linear</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] text-white/40 w-12">Scale</span>
+                                                            <input
+                                                                type="range"
+                                                                min="0"
+                                                                max="10"
+                                                                step="0.5"
+                                                                value={physics.adaptiveSpringScale}
+                                                                onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringScale: Number(e.target.value) }))}
+                                                                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                            />
+                                                            <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
 
-                                        {/* Spring Strength */}
-                                        <div>
-                                            <label className="text-xs text-white/60 flex justify-between mb-1">
-                                                <span>Spring Strength</span>
-                                                <span className="text-white/80">{physics.springStrength}</span>
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="0.1"
-                                                max="10"
-                                                step="0.1"
-                                                value={physics.springStrength}
-                                                onChange={(e) => setPhysics(p => ({ ...p, springStrength: Number(e.target.value) }))}
-                                                className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                            />
+                                        {/* === PHYSICS === */}
+                                        <div className="border-t border-white/10 pt-3">
+                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Physics</h4>
+                                            <div className="space-y-2">
+                                                {/* Repulsion */}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-white/50 w-20">Repulsion</span>
+                                                    <input
+                                                        type="range"
+                                                        min="10"
+                                                        max="500"
+                                                        step="10"
+                                                        value={physics.repulsionStrength}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, repulsionStrength: Number(e.target.value) }))}
+                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                    />
+                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.repulsionStrength}</span>
+                                                </div>
+                                                {/* Spring Length */}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-white/50 w-20">Edge Length</span>
+                                                    <input
+                                                        type="range"
+                                                        min="1"
+                                                        max="20"
+                                                        step="0.5"
+                                                        value={physics.springLength}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, springLength: Number(e.target.value) }))}
+                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                    />
+                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.springLength}</span>
+                                                </div>
+                                                {/* Spring Strength */}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-white/50 w-20">Edge Tension</span>
+                                                    <input
+                                                        type="range"
+                                                        min="0.1"
+                                                        max="10"
+                                                        step="0.1"
+                                                        value={physics.springStrength}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, springStrength: Number(e.target.value) }))}
+                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                    />
+                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.springStrength.toFixed(1)}</span>
+                                                </div>
+                                                {/* Center Gravity */}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-white/50 w-20">Gravity</span>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="5"
+                                                        step="0.1"
+                                                        value={physics.centerStrength}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, centerStrength: Number(e.target.value) }))}
+                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                    />
+                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.centerStrength.toFixed(1)}</span>
+                                                </div>
+                                                {/* Damping */}
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-white/50 w-20">Damping</span>
+                                                    <input
+                                                        type="range"
+                                                        min="0.3"
+                                                        max="0.95"
+                                                        step="0.05"
+                                                        value={physics.damping}
+                                                        onChange={(e) => setPhysics(p => ({ ...p, damping: Number(e.target.value) }))}
+                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                    />
+                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
+                                                </div>
+                                            </div>
                                         </div>
 
-                                        {/* Center Gravity */}
-                                        <div>
-                                            <label className="text-xs text-white/60 flex justify-between mb-1">
-                                                <span>Center Gravity</span>
-                                                <span className="text-white/80">{physics.centerStrength}</span>
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="5"
-                                                step="0.1"
-                                                value={physics.centerStrength}
-                                                onChange={(e) => setPhysics(p => ({ ...p, centerStrength: Number(e.target.value) }))}
-                                                className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                            />
+                                        {/* === ACTIONS === */}
+                                        <div className="border-t border-white/10 pt-3">
+                                            <button
+                                                onClick={() => setPhysics({ ...DEFAULT_PHYSICS })}
+                                                className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors"
+                                            >
+                                                Reset to Default
+                                            </button>
                                         </div>
-
-                                        {/* Damping */}
-                                        <div>
-                                            <label className="text-xs text-white/60 flex justify-between mb-1">
-                                                <span>Damping</span>
-                                                <span className="text-white/80">{physics.damping.toFixed(2)}</span>
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="0.5"
-                                                max="0.99"
-                                                step="0.01"
-                                                value={physics.damping}
-                                                onChange={(e) => setPhysics(p => ({ ...p, damping: Number(e.target.value) }))}
-                                                className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                            />
-                                        </div>
-
-                                        {/* Reset Button */}
-                                        <button
-                                            onClick={() => setPhysics({ ...DEFAULT_PHYSICS })}
-                                            className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors"
-                                        >
-                                            Reset to Default
-                                        </button>
 
                                         {/* Divider */}
                                         <div className="border-t border-white/10 pt-3 space-y-2">

@@ -390,6 +390,54 @@ export function extractNamespace(name: string, depth: number = 1): string {
   return filteredParts.slice(0, -depth).join('.')
 }
 
+/**
+ * Get namespace preview info for different depth levels
+ *
+ * @param nodes - Array of nodes to analyze
+ * @param maxDepth - Maximum depth to analyze (default 5)
+ * @returns Array of depth info, each containing unique namespaces and count
+ */
+export interface NamespaceDepthInfo {
+  depth: number
+  namespaces: string[]
+  count: number
+}
+
+export function getNamespaceDepthPreview(
+  nodes: AstrolabeNode[],
+  maxDepth: number = 5
+): NamespaceDepthInfo[] {
+  const result: NamespaceDepthInfo[] = []
+
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const namespaceSet = new Set<string>()
+
+    for (const node of nodes) {
+      const ns = extractNamespace(node.name, depth)
+      if (ns) {
+        namespaceSet.add(ns)
+      }
+    }
+
+    const namespaces = Array.from(namespaceSet).sort()
+
+    // Stop if we get no namespaces or same as previous depth
+    if (namespaces.length === 0) break
+    if (result.length > 0 && result[result.length - 1].count === namespaces.length) {
+      // Same grouping as previous depth, no point continuing
+      break
+    }
+
+    result.push({
+      depth,
+      namespaces,
+      count: namespaces.length
+    })
+  }
+
+  return result
+}
+
 export interface NamespaceGroups extends Map<string, AstrolabeNode[]> {
   nodeNamespaceMap?: Map<string, string>
 }
