@@ -539,6 +539,48 @@ export function calculateClusterForce(
   }
 }
 
+/**
+ * Calculate the repulsion force pushing a node away from other cluster centroids
+ * This creates separation between different namespace clusters
+ *
+ * @param nodePosition - Current position of the node
+ * @param nodeNamespace - The namespace this node belongs to
+ * @param allCentroids - Map of all cluster centroids
+ * @param strength - Force strength multiplier
+ * @returns Force vector (x, y, z)
+ */
+export function calculateInterClusterRepulsion(
+  nodePosition: Vec3,
+  nodeNamespace: string,
+  allCentroids: Map<string, Vec3>,
+  strength: number
+): Vec3 {
+  let fx = 0, fy = 0, fz = 0
+
+  for (const [namespace, centroid] of allCentroids) {
+    // Skip the node's own cluster
+    if (namespace === nodeNamespace) continue
+
+    const dx = nodePosition.x - centroid.x
+    const dy = nodePosition.y - centroid.y
+    const dz = nodePosition.z - centroid.z
+    const distSq = dx * dx + dy * dy + dz * dz
+    const dist = Math.sqrt(distSq)
+
+    if (dist < 0.1) continue // Avoid division by zero
+
+    // Repulsion force - stronger and with slower falloff for better separation
+    // Scale by 50 to make the slider more responsive
+    const force = (strength * 50) / (dist + 0.5)
+
+    fx += (dx / dist) * force
+    fy += (dy / dist) * force
+    fz += (dz / dist) * force
+  }
+
+  return { x: fx, y: fy, z: fz }
+}
+
 // ============================================
 // Density-Adaptive Edge Length
 // ============================================
