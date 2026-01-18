@@ -55,6 +55,7 @@ interface ForceGraph3DProps {
   physics?: PhysicsParams
   isAddingEdge?: boolean
   isRemovingNodes?: boolean  // Remove mode
+  nodesWithHiddenNeighbors?: Set<string>  // Nodes that have hidden dependencies/dependents
 }
 
 // Camera focus control
@@ -383,6 +384,7 @@ function GraphScene({
   physics,
   isAddingEdge = false,
   isRemovingNodes = false,
+  nodesWithHiddenNeighbors,
   savedPositionCount = 0,
   onStable,
   layoutStableTick,
@@ -405,6 +407,7 @@ function GraphScene({
   physics?: PhysicsParams
   isAddingEdge?: boolean
   isRemovingNodes?: boolean
+  nodesWithHiddenNeighbors?: Set<string>
   savedPositionCount?: number
   onStable?: () => void
   layoutStableTick: number
@@ -548,6 +551,7 @@ function GraphScene({
         if (!positionsRef.current.has(node.id)) return null
         const isDimmedByEdge = highlightedEdge !== null && node.id !== highlightedEdge.source && node.id !== highlightedEdge.target
         const isEdgeEndpoint = highlightedEdge !== null && (node.id === highlightedEdge.source || node.id === highlightedEdge.target)
+        const hasHiddenNeighbors = nodesWithHiddenNeighbors?.has(node.id) ?? false
 
         return (
           <Node3D
@@ -559,6 +563,7 @@ function GraphScene({
             isDimmed={isDimmedByEdge}
             isClickable={isAddingEdge && selectedNodeId !== node.id}
             isRemovable={isRemovingNodes}
+            hasHiddenNeighbors={hasHiddenNeighbors}
             onSelect={() => onNodeSelect(node)}
             onHover={(h) => setHoveredNodeId(h ? node.id : null)}
             onDragStart={() => setDraggingNodeId(node.id)}
@@ -623,6 +628,7 @@ export function ForceGraph3D({
   physics,
   isAddingEdge = false,
   isRemovingNodes = false,
+  nodesWithHiddenNeighbors,
 }: ForceGraph3DProps) {
   const positionsRef = useRef<Map<string, [number, number, number]>>(new Map())
   const [layoutStableTick, setLayoutStableTick] = useState(0)
@@ -809,6 +815,7 @@ export function ForceGraph3D({
           physics={physics}
           isAddingEdge={isAddingEdge}
           isRemovingNodes={isRemovingNodes}
+          nodesWithHiddenNeighbors={nodesWithHiddenNeighbors}
           savedPositionCount={savedPositionCount}
           onStable={handleStable}
           layoutStableTick={layoutStableTick}

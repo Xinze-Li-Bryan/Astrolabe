@@ -148,6 +148,8 @@ function LocalEditorContent() {
     const [codeFile, setCodeFile] = useState<FileContent | null>(null)
     const [codeLoading, setCodeLoading] = useState(false)
     const [codeDirty, setCodeDirty] = useState(false)  // Whether there are unsaved changes
+    // Independent code location for edge selection (overrides selectedNode location when set)
+    const [codeLocation, setCodeLocation] = useState<{ filePath: string; lineNumber: number } | null>(null)
 
 
     // Canvas store - manages on-demand added nodes
@@ -261,6 +263,7 @@ function LocalEditorContent() {
         style?: string
         effect?: string
         defaultStyle: string  // Default style for this edge
+        skippedNodes?: string[]  // Technical nodes this shortcut edge bypasses
     }
     const [selectedEdge, setSelectedEdge] = useState<SelectedEdge | null>(null)
 
@@ -417,6 +420,8 @@ function LocalEditorContent() {
     // Unified node selection entry point
     const selectNode = useCallback((node: GraphNode | null) => {
         setSelectedNode(node)
+        // Clear codeLocation when selecting a node (use node's location instead)
+        setCodeLocation(null)
         if (node) {
             setEditingNote(node.notes || '')
             // If node has Lean file, automatically open code viewer
@@ -475,9 +480,11 @@ function LocalEditorContent() {
         setCodeViewerOpen(prev => !prev)
     }, [])
 
-    // Automatically load code when codeViewerOpen is true and there is a selectedNode
+    // Automatically load code when codeViewerOpen is true
+    // Priority: codeLocation (from edge selection) > selectedNode location
     useEffect(() => {
-        if (!codeViewerOpen || !selectedNode?.leanFilePath) {
+        const filePath = codeLocation?.filePath || selectedNode?.leanFilePath
+        if (!codeViewerOpen || !filePath) {
             return
         }
 
@@ -485,7 +492,7 @@ function LocalEditorContent() {
             setCodeLoading(true)
             try {
                 // Load full file to support editing
-                const result = await readFullFile(selectedNode.leanFilePath!)
+                const result = await readFullFile(filePath)
                 setCodeFile(result)
             } catch (error) {
                 console.error('Failed to read file:', error)
@@ -501,7 +508,7 @@ function LocalEditorContent() {
         }
 
         loadCode()
-    }, [codeViewerOpen, selectedNode?.leanFilePath, selectedNode?.leanLineNumber])
+    }, [codeViewerOpen, codeLocation?.filePath, codeLocation?.lineNumber, selectedNode?.leanFilePath, selectedNode?.leanLineNumber])
 
     // Handle code editing changes
     const handleCodeChange = useCallback(async (newContent: string) => {
@@ -753,6 +760,32 @@ function LocalEditorContent() {
             }))
     }, [astrolabeEdges, canvasNodes])
 
+    // Calculate which nodes have hidden neighbors (dependencies or dependents not on canvas)
+    // These nodes should be highlighted to indicate they can be "expanded"
+    const nodesWithHiddenNeighbors: Set<string> = useMemo(() => {
+        const visibleNodeIds = new Set(visibleNodes)
+        const result = new Set<string>()
+
+        // For each visible node, check if any of its neighbors are hidden
+        for (const nodeId of visibleNodeIds) {
+            // Check all edges from astrolabeEdges (complete edge list)
+            for (const edge of astrolabeEdges) {
+                if (edge.source === nodeId && !visibleNodeIds.has(edge.target)) {
+                    // This node has a hidden dependency (outgoing edge to hidden node)
+                    result.add(nodeId)
+                    break
+                }
+                if (edge.target === nodeId && !visibleNodeIds.has(edge.source)) {
+                    // This node has a hidden dependent (incoming edge from hidden node)
+                    result.add(nodeId)
+                    break
+                }
+            }
+        }
+
+        return result
+    }, [visibleNodes, astrolabeEdges])
+
     // Only show customNodes in visibleNodes (uniformly controlled by visibleNodes[] for visibility)
     const visibleCustomNodes = useMemo(() => {
         const visibleNodeIds = new Set(visibleNodes)
@@ -981,11 +1014,21 @@ function LocalEditorContent() {
                 style: edgeData?.style ?? customEdge?.style,
                 effect: edgeData?.effect ?? customEdge?.effect,
                 defaultStyle: edgeData?.defaultStyle ?? (customEdge ? 'dashed' : 'solid'),
+                skippedNodes: edgeData?.skippedNodes,
             })
             // Focus on edge
             setFocusEdgeId(edge.id)
             // Open Edges tool panel to show edge style
             setToolPanelView('edges')
+            // Set code location to source node (only update code viewer, not selectedNode)
+            const sourceGraphNode = graphNodes.find(n => n.id === edge.source)
+            if (sourceGraphNode?.leanFilePath && sourceGraphNode?.leanLineNumber) {
+                setCodeLocation({
+                    filePath: sourceGraphNode.leanFilePath,
+                    lineNumber: sourceGraphNode.leanLineNumber,
+                })
+                setCodeViewerOpen(true)
+            }
             // Save selected edge to viewport
             if (projectPath) {
                 updateViewport(projectPath, { selected_edge_id: edge.id }).catch((err) => {
@@ -1243,6 +1286,7 @@ function LocalEditorContent() {
                                     physics={physics}
                                     isAddingEdge={isAddingEdge}
                                     isRemovingNodes={isRemovingNodes}
+                                    nodesWithHiddenNeighbors={nodesWithHiddenNeighbors}
                                 />
                             ) : (
                                 <SigmaGraph
@@ -1982,6 +2026,9 @@ function LocalEditorContent() {
                                                                         const isOnCanvas = node ? visibleNodes.includes(node.id) : false
                                                                         const edgeId = isCustom ? edge.id : `${edge.source}->${edge.target}`
                                                                         const isEdgeSelected = selectedEdge?.id === edgeId
+                                                                        // Check if this is a shortcut/virtual edge
+                                                                        const edgeData = isCustom ? edge : astrolabeEdges.find(e => e.id === edgeId || e.id === `virtual-${edgeId}`)
+                                                                        const isShortcut = edgeData?.skippedNodes && edgeData.skippedNodes.length > 0
 
                                                                         return (
                                                                             <div
@@ -1991,9 +2038,8 @@ function LocalEditorContent() {
                                                                                         setSelectedEdge(null)
                                                                                         setFocusEdgeId(null)
                                                                                     } else {
-                                                                                        const edgeData = isCustom ? edge : astrolabeEdges.find(e => e.id === edgeId)
                                                                                         setSelectedEdge({
-                                                                                            id: edgeId,
+                                                                                            id: edgeData?.id || edgeId,
                                                                                             source: edge.source,
                                                                                             target: edge.target,
                                                                                             sourceName: direction === 'in' ? nodeName : selectedNode.name,
@@ -2001,18 +2047,32 @@ function LocalEditorContent() {
                                                                                             style: edgeData?.style,
                                                                                             effect: edgeData?.effect,
                                                                                             defaultStyle: isCustom ? 'dashed' : (edgeData?.defaultStyle ?? 'solid'),
+                                                                                            skippedNodes: edgeData?.skippedNodes,
                                                                                         })
-                                                                                        setFocusEdgeId(edgeId)
+                                                                                        setFocusEdgeId(edgeData?.id || edgeId)
+                                                                                        // Set code location to the other end node
+                                                                                        const otherNode = graphNodes.find(n => n.id === nodeId)
+                                                                                        if (otherNode?.leanFilePath && otherNode?.leanLineNumber) {
+                                                                                            setCodeLocation({
+                                                                                                filePath: otherNode.leanFilePath,
+                                                                                                lineNumber: otherNode.leanLineNumber,
+                                                                                            })
+                                                                                            setCodeViewerOpen(true)
+                                                                                        }
                                                                                     }
                                                                                 }}
                                                                                 className={`px-1.5 py-1 rounded text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors ${
                                                                                     isEdgeSelected
                                                                                         ? 'bg-cyan-500/30 ring-1 ring-cyan-500/50'
-                                                                                        : 'bg-white/5 hover:bg-white/10'
+                                                                                        : isShortcut
+                                                                                            ? 'bg-cyan-500/10 hover:bg-cyan-500/20 ring-1 ring-cyan-500/20'
+                                                                                            : 'bg-white/5 hover:bg-white/10'
                                                                                 }`}
                                                                             >
+                                                                                {/* Shortcut indicator */}
+                                                                                {isShortcut && <span className="text-cyan-400 text-[9px] flex-shrink-0" title={`Shortcut: skips ${edgeData?.skippedNodes?.length} technical node(s)`}>⚡</span>}
                                                                                 {/* Custom indicator */}
-                                                                                {isCustom && <span className="w-2 h-0 border-t border-dashed border-gray-400 flex-shrink-0" title="Custom edge" />}
+                                                                                {isCustom && !isShortcut && <span className="w-2 h-0 border-t border-dashed border-gray-400 flex-shrink-0" title="Custom edge" />}
                                                                                 {/* Node name */}
                                                                                 <span
                                                                                     className={`font-mono flex-1 truncate ${isOnCanvas ? '' : 'opacity-50'}`}
@@ -2085,6 +2145,32 @@ function LocalEditorContent() {
                                                                 {/* Edge Style Panel */}
                                                                 {selectedEdge && (
                                                                     <div className="pt-2 border-t border-white/10">
+                                                                        {/* Shortcut Edge Info */}
+                                                                        {selectedEdge.skippedNodes && selectedEdge.skippedNodes.length > 0 && (
+                                                                            <div className="mb-3 p-2 bg-cyan-500/10 border border-cyan-500/30 rounded">
+                                                                                <div className="flex items-center gap-2 mb-1">
+                                                                                    <span className="text-cyan-400 text-xs font-medium">⚡ Shortcut Edge</span>
+                                                                                    <span className="text-white/40 text-xs">
+                                                                                        ({selectedEdge.skippedNodes.length} hidden)
+                                                                                    </span>
+                                                                                </div>
+                                                                                <div className="flex flex-wrap gap-1">
+                                                                                    {selectedEdge.skippedNodes.map(nodeId => {
+                                                                                        const node = graphNodes.find(n => n.id === nodeId)
+                                                                                        const displayName = node?.name?.split('.').pop() || nodeId.split('.').pop() || nodeId
+                                                                                        return (
+                                                                                            <span
+                                                                                                key={nodeId}
+                                                                                                className="px-1.5 py-0.5 bg-white/5 text-white/60 text-[10px] rounded truncate max-w-[100px]"
+                                                                                                title={node?.name || nodeId}
+                                                                                            >
+                                                                                                {displayName}
+                                                                                            </span>
+                                                                                        )
+                                                                                    })}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
                                                                         <EdgeStylePanel
                                                                             edgeId={selectedEdge.id}
                                                                             sourceNode={selectedEdge.sourceName}
@@ -2352,10 +2438,10 @@ function LocalEditorContent() {
                                                         )}
                                                         {codeFile ? (
                                                             <LeanCodePanel
-                                                                key={`${selectedNode?.leanFilePath || 'editor'}-${nodeClickCount}`}
+                                                                key={`${codeLocation?.filePath || selectedNode?.leanFilePath || 'editor'}-${codeLocation?.lineNumber || 0}-${nodeClickCount}`}
                                                                 content={codeFile.content}
-                                                                filePath={selectedNode?.leanFilePath}
-                                                                lineNumber={selectedNode?.leanLineNumber}
+                                                                filePath={codeLocation?.filePath || selectedNode?.leanFilePath}
+                                                                lineNumber={codeLocation?.lineNumber || selectedNode?.leanLineNumber}
                                                                 startLine={codeFile.startLine}
                                                                 endLine={codeFile.endLine}
                                                                 totalLines={codeFile.totalLines}
