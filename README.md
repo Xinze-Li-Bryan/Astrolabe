@@ -15,13 +15,23 @@ This includes:
 - Dynamic knowledge graphs generated from mathematical papers
 - New interaction paradigms that spark broader interest in formal mathematics
 
-## Contributing
+## How to Contribute
 
-To achieve this, we need everyone's contribution. Use AI-assisted coding to bring your ideas to life — we'll coordinate the engineering team to help implement and integrate them.
+We use an **AI-native open-source workflow**. No software engineering background required — bring ideas, AI handles code, we handle integration.
 
-Not sure where to start? Just feed this entire README to your favorite AI and ask it to help you contribute.
+**Pick up a feature:**
+1. Browse `feature/xxx` branches — each contains:
+   - `PROMPT.md` — instructions for AI to implement the feature
+   - `CONTEXT.md` — relevant code/architecture context
+   - `ACCEPTANCE.md` — criteria for completion
+2. Claim a feature, use your favorite AI (Claude, Cursor, GPT, etc.) to implement it
+3. Submit a PR when done
 
-Open an issue or submit a PR.
+**Propose your own ideas:**
+- Open an issue describing what you'd like to see
+- Or submit a PR directly — we'll help refine and integrate it
+
+Not sure where to start? Just feed this entire README to your AI and ask it to help you contribute.
 
 ---
 
