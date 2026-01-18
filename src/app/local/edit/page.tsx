@@ -113,7 +113,6 @@ function LocalEditorContent() {
     const [isTauri, setIsTauri] = useState(false)
     const [infoPanelOpen, setInfoPanelOpen] = useState(true) // Node Info panel
     const [searchPanelOpen, setSearchPanelOpen] = useState(true) // Left search panel
-    const [searchPanelKey, setSearchPanelKey] = useState(0) // Key to reset SearchPanel state
     const [viewMode, setViewMode] = useState<ViewMode>('3d') // Default 3D view
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
@@ -1194,7 +1193,6 @@ function LocalEditorContent() {
                         <>
                             <Panel defaultSize={15} minSize={10} maxSize={30}>
                                 <SearchPanel
-                                    key={searchPanelKey}
                                     className="h-full"
                                     selectedNodeId={selectedNode?.id}
                                     onNodeSelect={handleSearchResultSelect}
@@ -1287,7 +1285,6 @@ function LocalEditorContent() {
                                     onClick={() => {
                                         console.log('[Canvas] Refresh clicked')
                                         reloadGraph()
-                                        setSearchPanelKey(k => k + 1) // Reset SearchPanel state
                                     }}
                                     disabled={graphLoading}
                                     className="p-1.5 bg-black/60 hover:bg-white/20 rounded transition-colors disabled:opacity-50"
@@ -1517,7 +1514,7 @@ function LocalEditorContent() {
                                                 {physics.clusteringEnabled && (
                                                     <div className="mt-2 ml-5 space-y-2">
                                                         <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-white/40 w-14">Compact</span>
+                                                            <span className="text-[10px] text-white/40 w-14">Strength</span>
                                                             <input
                                                                 type="range"
                                                                 min="0"
@@ -1528,19 +1525,6 @@ function LocalEditorContent() {
                                                                 className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                             />
                                                             <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-white/40 w-14">Separate</span>
-                                                            <input
-                                                                type="range"
-                                                                min="0"
-                                                                max="10"
-                                                                step="0.5"
-                                                                value={physics.clusterSeparation ?? 0.5}
-                                                                onChange={(e) => setPhysics(p => ({ ...p, clusterSeparation: Number(e.target.value) }))}
-                                                                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                            />
-                                                            <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
                                                         </div>
                                                         <div>
                                                             <label className="text-[10px] text-white/40 mb-1 block">Depth</label>

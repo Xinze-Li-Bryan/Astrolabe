@@ -4,15 +4,12 @@
  * SearchPanel - Node search panel
  *
  * Search theorems/lemmas in the project, click to select node displayed in right panel
- * Supports two browse modes:
- * - Namespace: A-Z letter → Namespace → Type hierarchy with depth selector, sorted by popularity
- * - Popular: Group by usage count (usedByCount)
+ * Supports four browse modes: A-Z, Popular, Links, Depth
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useCanvasStore, SearchResult } from '@/lib/canvasStore'
+import { useCanvasStore, SearchResult, CustomNode } from '@/lib/canvasStore'
 import { KIND_COLORS } from '@/lib/store'
-import { extractNamespace, getNamespaceDepthPreview } from '@/lib/graphProcessing'
 
 // Type label mapping
 const TYPE_LABELS: Record<string, string> = {
@@ -30,7 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 // Browse mode type
-type BrowseMode = 'namespace' | 'popular'
+type BrowseMode = 'type' | 'az' | 'popular' | 'links' | 'depth'
 
 // Icons for group headers
 const Icons = {
@@ -54,6 +51,11 @@ const Icons = {
       <path d="M9 2c-1.05 0-2.05.16-3 .46 4.06 1.27 7 5.06 7 9.54s-2.94 8.27-7 9.54c.95.3 1.95.46 3 .46 5.52 0 10-4.48 10-10S14.52 2 9 2z"/>
     </svg>
   ),
+  link: (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>
+    </svg>
+  ),
   layers: (
     <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
@@ -68,7 +70,6 @@ interface Group {
   icon?: React.ReactNode
   color?: string  // Used to display type color in Type mode
   kind?: string   // Used to identify type in Type mode
-  level?: number  // 0: letter, 1: namespace, 2: type
   items: SearchResult[]
 }
 
@@ -86,11 +87,11 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
     visibleNodes,
     customNodes,
     search,
+    setSearchQuery,
   } = useCanvasStore()
 
   const [localQuery, setLocalQuery] = useState(searchQuery)
-  const [browseMode, setBrowseMode] = useState<BrowseMode>('namespace')
-  const [namespaceDepth, setNamespaceDepth] = useState(1)
+  const [browseMode, setBrowseMode] = useState<BrowseMode>('type')
 
   // Convert customNodes to SearchResult format and merge with searchResults
   const allResults = useMemo((): SearchResult[] => {
@@ -191,123 +192,68 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
     return indices
   }, [allResults])
 
-  // Calculate namespace depth preview for the depth selector
-  const namespaceDepthPreview = useMemo(() => {
-    // Convert SearchResult to minimal node format for getNamespaceDepthPreview
-    const nodes = allResults.map(r => ({ id: r.id, name: r.name, kind: r.kind as any }))
-    return getNamespaceDepthPreview(nodes as any, 5)
-  }, [allResults])
-
   // Group results based on browse mode
   const groupedResults = useMemo((): Group[] => {
     if (allResults.length === 0) return []
 
     switch (browseMode) {
-      case 'namespace': {
-        // Namespace mode: A-Z → Namespace → Type hierarchy
+      case 'type': {
+        // Type mode: group by node type
+        // Define type order (important types first), custom at the end
         const typeOrder = ['theorem', 'lemma', 'axiom', 'definition', 'structure', 'class', 'instance', 'inductive', 'example', 'custom']
+        const groups: Record<string, SearchResult[]> = {}
 
-        // First, group by namespace at current depth
-        const namespaceGroups: Record<string, SearchResult[]> = {}
         for (const result of allResults) {
-          const ns = extractNamespace(result.name, namespaceDepth) || '(root)'
-          if (!namespaceGroups[ns]) namespaceGroups[ns] = []
-          namespaceGroups[ns].push(result)
+          const kind = result.kind || 'unknown'
+          if (!groups[kind]) groups[kind] = []
+          groups[kind].push(result)
         }
 
-        // Group namespaces by first letter (A-Z), non-letters go to #
-        const letterGroups: Record<string, string[]> = {}
-        for (const ns of Object.keys(namespaceGroups)) {
-          let letter = '#'
-          if (ns !== '(root)' && ns.length > 0) {
-            const firstChar = ns[0].toUpperCase()
-            // Only use A-Z as letter groups, everything else goes to #
-            if (firstChar >= 'A' && firstChar <= 'Z') {
-              letter = firstChar
-            }
-          }
-          if (!letterGroups[letter]) letterGroups[letter] = []
-          letterGroups[letter].push(ns)
+        // Sort within groups by usedByCount descending
+        for (const kind of Object.keys(groups)) {
+          groups[kind].sort((a, b) => b.usedByCount - a.usedByCount)
         }
 
-        // Sort letters alphabetically, with # at the end
-        const sortedLetters = Object.keys(letterGroups).sort((a, b) => {
-          if (a === '#') return 1
-          if (b === '#') return -1
-          return a.localeCompare(b)
+        // Arrange by predefined order, unknown types at the end
+        const sortedKinds = Object.keys(groups).sort((a, b) => {
+          const aIndex = typeOrder.indexOf(a)
+          const bIndex = typeOrder.indexOf(b)
+          if (aIndex === -1 && bIndex === -1) return a.localeCompare(b)
+          if (aIndex === -1) return 1
+          if (bIndex === -1) return -1
+          return aIndex - bIndex
         })
 
-        // Sort namespaces within each letter group
-        for (const letter of sortedLetters) {
-          letterGroups[letter].sort((a, b) => {
-            if (a === '(root)') return 1
-            if (b === '(root)') return -1
-            return a.localeCompare(b)
-          })
+        return sortedKinds.map(kind => ({
+          key: `type-${kind}`,
+          label: TYPE_LABELS[kind] || kind,
+          color: KIND_COLORS[kind] || '#666',
+          kind: kind,
+          items: groups[kind],
+        }))
+      }
+
+      case 'az': {
+        // A-Z mode: group by first letter, sort within groups by usedByCount descending
+        const groups: Record<string, SearchResult[]> = {}
+        for (const result of allResults) {
+          const firstChar = result.name.charAt(0).toUpperCase()
+          const key = /[A-Z]/.test(firstChar) ? firstChar : '#'
+          if (!groups[key]) groups[key] = []
+          groups[key].push(result)
         }
-
-        const groups: Group[] = []
-
-        for (const letter of sortedLetters) {
-          // Add letter header group (level 0)
-          groups.push({
-            key: `letter-${letter}`,
-            label: letter,
-            level: 0,
-            items: [], // Letter group has no direct items
-          })
-
-          // Add namespaces under this letter
-          for (const ns of letterGroups[letter]) {
-            const nsItems = namespaceGroups[ns]
-
-            // Add namespace group (level 1)
-            groups.push({
-              key: `ns-${ns}`,
-              label: ns,
-              icon: Icons.layers,
-              level: 1,
-              items: [], // Namespace group has no direct items when showing types
-            })
-
-            // Sub-group by type within namespace
-            const typeGroups: Record<string, SearchResult[]> = {}
-            for (const item of nsItems) {
-              const kind = item.kind || 'unknown'
-              if (!typeGroups[kind]) typeGroups[kind] = []
-              typeGroups[kind].push(item)
-            }
-
-            // Sort within type groups by popularity (usedByCount)
-            for (const kind of Object.keys(typeGroups)) {
-              typeGroups[kind].sort((a, b) => b.usedByCount - a.usedByCount)
-            }
-
-            // Arrange types by predefined order
-            const sortedKinds = Object.keys(typeGroups).sort((a, b) => {
-              const aIndex = typeOrder.indexOf(a)
-              const bIndex = typeOrder.indexOf(b)
-              if (aIndex === -1 && bIndex === -1) return a.localeCompare(b)
-              if (aIndex === -1) return 1
-              if (bIndex === -1) return -1
-              return aIndex - bIndex
-            })
-
-            // Add type subgroups (level 2)
-            for (const kind of sortedKinds) {
-              groups.push({
-                key: `ns-${ns}-type-${kind}`,
-                label: TYPE_LABELS[kind] || kind,
-                color: KIND_COLORS[kind] || '#666',
-                kind: kind,
-                level: 2,
-                items: typeGroups[kind],
-              })
-            }
-          }
+        // Sort within groups by usedByCount descending
+        for (const key of Object.keys(groups)) {
+          groups[key].sort((a, b) => b.usedByCount - a.usedByCount)
         }
-
-        return groups
+        // Arrange groups in alphabetical order
+        return Object.keys(groups)
+          .sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b))
+          .map(key => ({
+            key,
+            label: key,
+            items: groups[key],
+          }))
       }
 
       case 'popular': {
@@ -334,50 +280,78 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
         }
         return groups
       }
+
+      case 'links': {
+        // Links mode: group by dependsOnCount
+        const ranges = [
+          { min: 10, max: Infinity, label: 'Complex' },
+          { min: 5, max: 9, label: 'Medium' },
+          { min: 1, max: 4, label: 'Simple' },
+          { min: 0, max: 0, label: 'Independent' },
+        ]
+        const groups: Group[] = []
+        for (const range of ranges) {
+          const items = allResults.filter(r =>
+            r.dependsOnCount >= range.min && r.dependsOnCount <= range.max
+          ).sort((a, b) => b.dependsOnCount - a.dependsOnCount)
+          if (items.length > 0) {
+            groups.push({
+              key: `links-${range.min}-${range.max}`,
+              label: range.label,
+              icon: Icons.link,
+              items,
+            })
+          }
+        }
+        return groups
+      }
+
+      case 'depth': {
+        // Depth mode: group by depth, deepest first
+        const maxDepth = Math.max(...allResults.map(r => r.depth), 0)
+        const groups: Group[] = []
+        // Iterate from deepest to shallowest
+        for (let d = maxDepth; d >= 0; d--) {
+          const items = allResults.filter(r => r.depth === d)
+            .sort((a, b) => b.usedByCount - a.usedByCount)
+          if (items.length > 0) {
+            groups.push({
+              key: `depth-${d}`,
+              label: `Depth ${d}`,
+              icon: Icons.layers,
+              items,
+            })
+          }
+        }
+        return groups
+      }
     }
-  }, [allResults, browseMode, namespaceDepth])
+  }, [allResults, browseMode])
 
   // When selectedNodeId changes, scroll to the node and expand its group
   useEffect(() => {
     if (!selectedNodeId) return
 
-    // Find the group containing the selected node
-    const typeGroup = groupedResults.find(g => g.items.some(item => item.id === selectedNodeId))
-    if (!typeGroup) return
-
-    // For namespace mode, we need to expand the parent groups too
-    // Group keys are like: letter-M, ns-Mathlib.Algebra, ns-Mathlib.Algebra-type-theorem
-    const keysToExpand: string[] = [typeGroup.key]
-
-    if (browseMode === 'namespace' && typeGroup.key.includes('-type-')) {
-      // Extract namespace key from type group key (remove -type-xxx suffix)
-      const nsKey = typeGroup.key.replace(/-type-[^-]+$/, '')
-      keysToExpand.push(nsKey)
-
-      // Find the letter group for this namespace
-      const nsGroup = groupedResults.find(g => g.key === nsKey)
-      if (nsGroup) {
-        // Get first letter of namespace label
-        const label = nsGroup.label
-        const firstChar = label[0]?.toUpperCase()
-        if (firstChar && firstChar >= 'A' && firstChar <= 'Z') {
-          keysToExpand.push(`letter-${firstChar}`)
-        } else {
-          keysToExpand.push('letter-#')
+    // Find the group containing the selected node and expand it
+    const groupKey = groupedResults.find(g => g.items.some(item => item.id === selectedNodeId))?.key
+    if (groupKey) {
+      setCollapsedGroups(prev => {
+        // If 'all', expand the group containing selected node (others stay collapsed)
+        if (prev === 'all') {
+          const allKeys = new Set(groupedResults.map(g => g.key))
+          allKeys.delete(groupKey)
+          return allKeys
         }
-      }
+        if (prev.has(groupKey)) {
+          const next = new Set(prev)
+          next.delete(groupKey)
+          return next
+        }
+        return prev
+      })
     }
 
-    // Collapse all groups except the path to the selected node
-    setCollapsedGroups(() => {
-      const allKeys = new Set(groupedResults.map(g => g.key))
-      for (const key of keysToExpand) {
-        allKeys.delete(key)
-      }
-      return allKeys
-    })
-
-    // Delay scroll, wait for groups to expand before scrolling
+    // Delay scroll, wait for group to expand before scrolling
     const timer = setTimeout(() => {
       const nodeEl = nodeRefs.current.get(selectedNodeId)
       if (nodeEl && scrollContainerRef.current) {
@@ -386,10 +360,10 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
           block: 'center',
         })
       }
-    }, 150)
+    }, 100)
 
     return () => clearTimeout(timer)
-  }, [selectedNodeId, groupedResults, browseMode])
+  }, [selectedNodeId, groupedResults])
 
   // Render single node item
   const renderNodeItem = (result: SearchResult) => {
@@ -422,7 +396,7 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
             className={`text-sm font-mono ${isVisible ? '' : 'opacity-50'}`}
             style={{ color: kindColor }}
           >
-            {result.name.split('.').map((part, i) => (
+            {result.name.split('.').map((part, i, arr) => (
               <div key={i}>
                 {i > 0 && <span className="text-white/30">.</span>}
                 {part}
@@ -435,6 +409,12 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
             <span>{TYPE_LABELS[result.kind] || result.kind} {kindIndices[result.id]}</span>
             {browseMode === 'popular' && result.usedByCount > 0 && (
               <span className={isVisible ? 'text-blue-400' : 'text-blue-400/50'}>↑{result.usedByCount}</span>
+            )}
+            {browseMode === 'links' && result.dependsOnCount > 0 && (
+              <span className={isVisible ? 'text-purple-400' : 'text-purple-400/50'}>→{result.dependsOnCount}</span>
+            )}
+            {browseMode === 'depth' && (
+              <span className={isVisible ? 'text-green-400' : 'text-green-400/50'}>d{result.depth}</span>
             )}
             {result.status === 'sorry' && (
               <span className={isVisible ? 'text-yellow-500' : 'text-yellow-500/50'}>sorry</span>
@@ -469,11 +449,14 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
       </div>
 
       {/* Browse mode buttons */}
-      <div className="p-2 border-b border-white/10">
-        <div className="flex gap-1">
+      <div className="p-2 border-b border-white/10 overflow-x-auto scrollbar-thin">
+        <div className="flex gap-1 min-w-max">
           {([
-            { mode: 'namespace' as const, label: 'Namespace' },
+            { mode: 'type' as const, label: 'Type' },
+            { mode: 'az' as const, label: 'A-Z' },
             { mode: 'popular' as const, label: 'Popular' },
+            { mode: 'links' as const, label: 'Links' },
+            { mode: 'depth' as const, label: 'Depth' },
           ]).map(({ mode, label }) => (
             <button
               key={mode}
@@ -488,46 +471,6 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
             </button>
           ))}
         </div>
-
-        {/* Namespace mode: Depth selector */}
-        {browseMode === 'namespace' && (
-          <div className="mt-2 text-xs">
-            <div className="flex items-center gap-1">
-              <span className="text-white/40">Depth:</span>
-              <div className="flex gap-0.5">
-                {namespaceDepthPreview.map(info => (
-                  <div key={info.depth} className="relative group">
-                    <button
-                      onClick={() => setNamespaceDepth(info.depth)}
-                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                        namespaceDepth === info.depth
-                          ? 'bg-purple-500/30 text-purple-300'
-                          : 'bg-white/5 text-white/40 hover:bg-white/10'
-                      }`}
-                    >
-                      {info.depth}
-                    </button>
-                    {/* Hover popup */}
-                    <div className="absolute left-0 top-full mt-1 z-50 hidden group-hover:block">
-                      <div className="bg-[#1a1a1a] border border-white/20 rounded-lg shadow-xl p-2 min-w-[150px] max-w-[250px] max-h-[200px] overflow-y-auto">
-                        <div className="text-[10px] text-white/50 mb-1">
-                          Level {info.depth} ({info.count} groups)
-                        </div>
-                        <div className="flex flex-col gap-0.5">
-                          {info.namespaces.map(ns => (
-                            <div key={ns} className="text-[11px] text-white/80 truncate">
-                              {ns}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Grouped Results */}
@@ -538,87 +481,41 @@ export function SearchPanel({ className = '', selectedNodeId, onNodeSelect }: Se
           </div>
         )}
 
-        {(() => {
-          // Track collapsed parent levels to hide children
-          let collapsedLetterKey: string | null = null
-          let collapsedNsKey: string | null = null
+        {groupedResults.map((group) => {
+          // 'all' means all collapsed, otherwise check if in collapsed set
+          const isCollapsed = collapsedGroups === 'all' || collapsedGroups.has(group.key)
+          return (
+            <div key={group.key}>
+              {/* Group header */}
+              <button
+                onClick={() => toggleGroup(group.key, groupedResults)}
+                className="w-full flex items-center gap-2 px-3 py-2 bg-white/5 hover:bg-white/10 text-left sticky top-0 z-10 border-b border-white/10"
+              >
+                <span className="text-white/60 text-xs">
+                  {isCollapsed ? '▶' : '▼'}
+                </span>
+                {group.color && (
+                  <div
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: group.color }}
+                  />
+                )}
+                {group.icon && (
+                  <span className="text-white/60">{group.icon}</span>
+                )}
+                <span className="text-sm text-white/80 font-medium">
+                  {group.label}
+                </span>
+                <span className="text-xs text-white/40 ml-auto">
+                  {group.items.length}
+                </span>
+              </button>
 
-          return groupedResults.map((group, index) => {
-            const level = group.level ?? 0
-            const isCollapsed = collapsedGroups === 'all' || collapsedGroups.has(group.key)
-            const hasItems = group.items.length > 0
-
-            // Update collapsed parent tracking
-            if (level === 0) {
-              collapsedLetterKey = isCollapsed ? group.key : null
-              collapsedNsKey = null // Reset namespace tracking when entering new letter
-            } else if (level === 1) {
-              // If parent letter is collapsed, this namespace is hidden
-              if (collapsedLetterKey) return null
-              collapsedNsKey = isCollapsed ? group.key : null
-            } else if (level === 2) {
-              // If parent letter or namespace is collapsed, this type is hidden
-              if (collapsedLetterKey || collapsedNsKey) return null
-            }
-
-            // Calculate total items under this group (for letter/namespace headers)
-            let totalItems = group.items.length
-            if (level < 2) {
-              // Count items in child groups
-              for (let i = index + 1; i < groupedResults.length; i++) {
-                const child = groupedResults[i]
-                const childLevel = child.level ?? 0
-                if (childLevel <= level) break // Reached next sibling or parent
-                if (childLevel === 2) totalItems += child.items.length
-              }
-            }
-
-            // Style based on level
-            const levelStyles = {
-              0: 'pl-2 py-1.5 bg-white/10 text-white font-bold text-sm', // Letter header
-              1: 'pl-4 py-1.5 bg-white/5 text-white/70 text-sm', // Namespace header
-              2: 'pl-8 py-1.5 bg-transparent hover:bg-white/5 text-white/60 text-xs', // Type header
-            }[level] || ''
-
-            return (
-              <div key={group.key}>
-                {/* Group header */}
-                <button
-                  onClick={() => toggleGroup(group.key, groupedResults)}
-                  className={`w-full flex items-center gap-2 text-left border-b border-white/5 ${levelStyles}`}
-                >
-                  {/* Arrow */}
-                  <span className="text-white/40 text-[10px] w-3">
-                    {isCollapsed ? '▶' : '▼'}
-                  </span>
-                  {/* Type color dot */}
-                  {group.color && (
-                    <div
-                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: group.color }}
-                    />
-                  )}
-                  {/* Namespace icon */}
-                  {group.icon && level === 1 && (
-                    <span className="text-white/40">{group.icon}</span>
-                  )}
-                  <span className="truncate">
-                    {group.label}
-                  </span>
-                  {/* Item count */}
-                  {totalItems > 0 && (
-                    <span className="text-[10px] text-white/30 ml-auto pr-2">
-                      {totalItems}
-                    </span>
-                  )}
-                </button>
-
-                {/* Group items (only for level 2 type groups) */}
-                {!isCollapsed && hasItems && group.items.map(renderNodeItem)}
-              </div>
-            )
-          })
-        })()}
+              {/* Group items */}
+              {!isCollapsed && group.items.map(renderNodeItem)}
+            </div>
+          )
+        })}
       </div>
 
     </div>
