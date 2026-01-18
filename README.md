@@ -237,6 +237,10 @@ Astrolabe stores project-specific data in `.astrolabe/` within each Lean project
 | Scroll | Zoom |
 | Right-click drag | Pan |
 
+## Contributors
+
+Thanks to all contributors who help make Astrolabe better!
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
