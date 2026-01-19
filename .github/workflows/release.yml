@@ -202,11 +202,11 @@ jobs:
 
           ls -la release-files/
 
-      - name: Create release in target repo
+      - name: Create release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          repository: Lean-Astrolabe/Astrolabe-Releases
-          token: ${{ secrets.RELEASE_PAT }}
           tag_name: ${{ github.ref_name }}
           name: Astrolabe ${{ github.ref_name }}
           body: |
