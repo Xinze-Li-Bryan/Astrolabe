@@ -37,10 +37,6 @@
           "name": "uvicorn",
           "cmd": "uvicorn",
           "args": true
-        },
-        {
-          "name": "astrolabe-server",
-          "sidecar": true
         }
       ]
     }
