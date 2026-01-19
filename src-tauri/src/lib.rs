@@ -21,49 +21,59 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .manage(SidecarState(Mutex::new(None)))
         .setup(|app| {
-            // Start the backend sidecar
-            let shell = app.shell();
+            // Only start the backend sidecar in release builds
+            // In dev mode, the backend is started separately with `npm run backend`
+            #[cfg(not(debug_assertions))]
+            {
+                let shell = app.shell();
 
-            match shell.sidecar("astrolabe-server") {
-                Ok(sidecar_command) => {
-                    match sidecar_command.spawn() {
-                        Ok((mut rx, child)) => {
-                            // Store the child process handle
-                            let state = app.state::<SidecarState>();
-                            *state.0.lock().unwrap() = Some(child);
+                match shell.sidecar("astrolabe-server") {
+                    Ok(sidecar_command) => {
+                        match sidecar_command.spawn() {
+                            Ok((mut rx, child)) => {
+                                // Store the child process handle
+                                let state = app.state::<SidecarState>();
+                                *state.0.lock().unwrap() = Some(child);
 
-                            // Log sidecar output
-                            tauri::async_runtime::spawn(async move {
-                                use tauri_plugin_shell::process::CommandEvent;
-                                while let Some(event) = rx.recv().await {
-                                    match event {
-                                        CommandEvent::Stdout(line) => {
-                                            println!("[Backend] {}", String::from_utf8_lossy(&line));
+                                // Log sidecar output
+                                tauri::async_runtime::spawn(async move {
+                                    use tauri_plugin_shell::process::CommandEvent;
+                                    while let Some(event) = rx.recv().await {
+                                        match event {
+                                            CommandEvent::Stdout(line) => {
+                                                println!("[Backend] {}", String::from_utf8_lossy(&line));
+                                            }
+                                            CommandEvent::Stderr(line) => {
+                                                eprintln!("[Backend] {}", String::from_utf8_lossy(&line));
+                                            }
+                                            CommandEvent::Error(err) => {
+                                                eprintln!("[Backend Error] {}", err);
+                                            }
+                                            CommandEvent::Terminated(payload) => {
+                                                println!("[Backend] Terminated with code: {:?}", payload.code);
+                                            }
+                                            _ => {}
                                         }
-                                        CommandEvent::Stderr(line) => {
-                                            eprintln!("[Backend] {}", String::from_utf8_lossy(&line));
-                                        }
-                                        CommandEvent::Error(err) => {
-                                            eprintln!("[Backend Error] {}", err);
-                                        }
-                                        CommandEvent::Terminated(payload) => {
-                                            println!("[Backend] Terminated with code: {:?}", payload.code);
-                                        }
-                                        _ => {}
                                     }
-                                }
-                            });
+                                });
 
-                            println!("[Astrolabe] Backend sidecar started");
-                        }
-                        Err(e) => {
-                            eprintln!("[Astrolabe] Failed to spawn sidecar: {}", e);
+                                println!("[Astrolabe] Backend sidecar started");
+                            }
+                            Err(e) => {
+                                eprintln!("[Astrolabe] Failed to spawn sidecar: {}", e);
+                            }
                         }
                     }
+                    Err(e) => {
+                        eprintln!("[Astrolabe] Failed to find sidecar: {}", e);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[Astrolabe] Failed to find sidecar: {}", e);
-                }
+            }
+
+            #[cfg(debug_assertions)]
+            {
+                println!("[Astrolabe] Dev mode: backend should be started separately with `npm run backend`");
+                let _ = app; // suppress unused variable warning
             }
 
             Ok(())
