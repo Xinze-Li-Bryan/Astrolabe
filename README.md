@@ -152,20 +152,25 @@ npm run backend   # Terminal 1: Backend at http://127.0.0.1:8765
 npm run dev       # Terminal 2: Frontend at http://localhost:3000
 ```
 
-### Building Desktop App
+### Building Desktop App (Release)
 
 ```bash
-# 1. Build the Python backend as standalone binary
-./scripts/build-backend.sh
-
-# 2. Build the Tauri desktop application
-npm run tauri build
+# One command to build everything
+./scripts/build-release.sh
 ```
 
-The backend is bundled as a sidecar binary using PyInstaller. This means:
-- End users don't need Python installed
-- The app starts the backend automatically
-- Everything is contained in a single application bundle
+This script automatically:
+1. Builds the Python backend as a standalone binary (PyInstaller)
+2. Configures Tauri for release build
+3. Builds the desktop application
+4. Restores dev configuration
+
+Output locations:
+- **macOS**: `src-tauri/target/release/bundle/dmg/`
+- **Windows**: `src-tauri/target/release/bundle/msi/` or `nsis/`
+- **Linux**: `src-tauri/target/release/bundle/deb/` or `appimage/`
+
+The release build bundles everything - end users don't need Python or Rust installed.
 
 ### Testing
 
