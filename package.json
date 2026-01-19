@@ -10,7 +10,7 @@
     "lint": "next lint",
     "tauri": "tauri",
     "backend": "cd backend && python3 -m uvicorn astrolabe.server:app --host 127.0.0.1 --port 8765",
-    "dev:all": "npm run backend & npm run tauri dev",
+    "dev:all": "concurrently \"npm run backend\" \"npm run tauri dev\"",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
@@ -59,6 +59,7 @@
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.0",
+    "concurrently": "^9.2.1",
     "jsdom": "^26.1.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
