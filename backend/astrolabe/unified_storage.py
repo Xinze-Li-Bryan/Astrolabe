@@ -27,6 +27,11 @@ class UnifiedStorage:
         "zoom": 1.0,
         "selected_node_id": None,
         "selected_edge_id": None,
+        "filter_options": {
+            "hideTechnical": False,
+            "hideOrphaned": False,
+            "transitiveReduction": True,
+        },
     }
 
     def __init__(self, graph_data: dict, meta_path: Path, project_path: Path = None):

@@ -463,12 +463,19 @@ export async function cancelInit(path: string): Promise<{
 // Viewport API (camera state persistence)
 // ============================================
 
+export interface FilterOptionsData {
+  hideTechnical: boolean;
+  hideOrphaned: boolean;
+  transitiveReduction: boolean;
+}
+
 export interface ViewportData {
   camera_position: [number, number, number];
   camera_target: [number, number, number];
   zoom: number;
   selected_node_id?: string;
   selected_edge_id?: string;
+  filter_options?: FilterOptionsData;
 }
 
 /**
@@ -485,6 +492,11 @@ export async function getViewport(path: string): Promise<ViewportData> {
       camera_position: [0, 0, 20],
       camera_target: [0, 0, 0],
       zoom: 1.0,
+      filter_options: {
+        hideTechnical: false,
+        hideOrphaned: false,
+        transitiveReduction: true,
+      },
     };
   }
 

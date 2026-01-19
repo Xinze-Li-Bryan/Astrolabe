@@ -131,12 +131,14 @@ function LocalEditorContent() {
     // When project path changes, reset viewport loading state
     const prevProjectPathRef = useRef<string | null>(null)
     const selectionRestoredRef = useRef(false)
+    const filterOptionsInitializedRef = useRef(false)  // Track if filter options have been initialized
     useEffect(() => {
         if (projectPath !== prevProjectPathRef.current) {
             prevProjectPathRef.current = projectPath
             setViewportLoaded(false)
             setInitialViewport(null)
             selectionRestoredRef.current = false  // Reset selection restored flag
+            filterOptionsInitializedRef.current = false  // Reset filter options initialized flag
             // Also clear current selection state, wait to load from new project
             setSelectedNodeState(null)
             setSelectedEdge(null)
@@ -569,20 +571,28 @@ function LocalEditorContent() {
         }
     }, [projectPath, setCanvasProjectPath, loadCanvas])
 
-    // Load viewport state (only load camera position)
+    // Load viewport state (camera position and filter options)
     useEffect(() => {
         if (!projectPath || viewportLoaded) return
 
         getViewport(projectPath)
             .then((viewport) => {
                 setInitialViewport(viewport)
+                // Restore filter options from viewport
+                if (viewport.filter_options) {
+                    setFilterOptions({
+                        hideTechnical: viewport.filter_options.hideTechnical ?? false,
+                        hideOrphaned: viewport.filter_options.hideOrphaned ?? false,
+                        transitiveReduction: viewport.filter_options.transitiveReduction ?? true,
+                    })
+                }
                 setViewportLoaded(true)
             })
             .catch((err) => {
                 console.error('[page] Failed to load viewport:', err)
                 setViewportLoaded(true)
             })
-    }, [projectPath, viewportLoaded])
+    }, [projectPath, viewportLoaded, setFilterOptions])
 
     // Restore selection state (executed after node data is loaded)
     useEffect(() => {
@@ -633,6 +643,42 @@ function LocalEditorContent() {
             }
         }
     }, [initialViewport, graphNodes, customNodes, astrolabeEdges, customEdges])
+
+    // Save filter options when they change (with debounce)
+    // Skip saving on initial load to avoid overwriting saved values with defaults
+    const saveFilterTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+    useEffect(() => {
+        if (!projectPath || !viewportLoaded) return
+
+        // Skip the first trigger after viewport is loaded (initial state)
+        if (!filterOptionsInitializedRef.current) {
+            filterOptionsInitializedRef.current = true
+            return
+        }
+
+        // Debounce: save after 300ms
+        if (saveFilterTimeoutRef.current) {
+            clearTimeout(saveFilterTimeoutRef.current)
+        }
+        saveFilterTimeoutRef.current = setTimeout(() => {
+            updateViewport(projectPath, {
+                filter_options: {
+                    hideTechnical: filterOptions.hideTechnical,
+                    hideOrphaned: filterOptions.hideOrphaned,
+                    transitiveReduction: filterOptions.transitiveReduction ?? true,
+                },
+            }).catch((err) => {
+                console.error('[page] Failed to save filter options:', err)
+            })
+        }, 300)
+
+        return () => {
+            if (saveFilterTimeoutRef.current) {
+                clearTimeout(saveFilterTimeoutRef.current)
+            }
+        }
+    }, [projectPath, viewportLoaded, filterOptions])
 
     // Save camera position (with debounce)
     const saveCameraTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -969,13 +1015,28 @@ function LocalEditorContent() {
             return
         }
 
-        // Regular node
+        // Regular node - check if on canvas for focusing
+        const isOnCanvas = visibleNodes.includes(result.id)
         const matchingNode = graphNodes.find(node => node.id === result.id)
-        if (matchingNode) {
-            selectNode(matchingNode)
-            setInfoPanelOpen(true) // Auto-open info panel
+
+        // Construct node info from SearchResult (works for all nodes, even filtered ones)
+        const nodeToSelect: GraphNode = matchingNode || {
+            id: result.id,
+            name: result.name,
+            type: result.kind as NodeKind,
+            status: (result.status as any) || 'stated',
+            leanFilePath: result.filePath,
+            leanLineNumber: result.lineNumber,
+            notes: '',
         }
-    }, [graphNodes, customNodes, selectNode])
+        selectNode(nodeToSelect)
+        setInfoPanelOpen(true)
+
+        // Only focus if node is on canvas
+        if (isOnCanvas) {
+            setFocusNodeId(result.id)
+        }
+    }, [graphNodes, visibleNodes, selectNode])
 
     // Handle edge selection from 3D view (stable callback to prevent edge flickering)
     const handleEdgeSelect = useCallback((edge: { id: string; source: string; target: string } | null) => {
@@ -1522,6 +1583,33 @@ function LocalEditorContent() {
                                                     {expandedInfoTips.has('transitiveReduction') && (
                                                         <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
                                                             Remove redundant edges: if path A→B→C exists, hide the direct A→C edge. Shows only essential dependencies.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                {/* Hide Orphaned */}
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={filterOptions.hideOrphaned ?? false}
+                                                            onChange={(e) => setFilterOptions({ ...filterOptions, hideOrphaned: e.target.checked })}
+                                                            className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                        />
+                                                        <span className="text-xs text-white/80">Hide Orphaned</span>
+                                                        <button
+                                                            onClick={() => setExpandedInfoTips(prev => {
+                                                                const next = new Set(prev)
+                                                                next.has('hideOrphaned') ? next.delete('hideOrphaned') : next.add('hideOrphaned')
+                                                                return next
+                                                            })}
+                                                            className="ml-auto text-white/30 hover:text-white/60"
+                                                        >
+                                                            <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                    {expandedInfoTips.has('hideOrphaned') && (
+                                                        <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                            Hide nodes that have no connections to other visible nodes. Useful for cleaning up isolated nodes.
                                                         </p>
                                                     )}
                                                 </div>

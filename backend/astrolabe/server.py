@@ -147,6 +147,14 @@ class CanvasAddNodesRequest(BaseModel):
     node_ids: list[str]
 
 
+class FilterOptionsData(BaseModel):
+    """Filter options for graph display"""
+
+    hideTechnical: bool = False
+    hideOrphaned: bool = False
+    transitiveReduction: bool = True
+
+
 class ViewportUpdateRequest(BaseModel):
     """Viewport state update request"""
 
@@ -156,6 +164,7 @@ class ViewportUpdateRequest(BaseModel):
     zoom: Optional[float] = None
     selected_node_id: Optional[str] = None
     selected_edge_id: Optional[str] = None
+    filter_options: Optional[FilterOptionsData] = None
 
 
 class UserNodeRequest(BaseModel):
@@ -742,6 +751,8 @@ async def update_viewport(request: ViewportUpdateRequest):
     if request.selected_edge_id is not None:
         # Empty string indicates clearing selection
         updates["selected_edge_id"] = request.selected_edge_id if request.selected_edge_id else None
+    if request.filter_options is not None:
+        updates["filter_options"] = request.filter_options.model_dump()
 
     storage.update_viewport(updates)
     viewport = storage.get_viewport()

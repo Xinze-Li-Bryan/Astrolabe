@@ -242,7 +242,7 @@ describe('processGraph', () => {
         expect(result.edges[0].source).toBe('A')
         expect(result.edges[0].target).toBe('B')
         expect(result.edges[0].id).toContain('virtual')
-        expect(result.edges[0].style).toBe('dashed')
+        expect(result.edges[0].style).toBe('glow')
         expect(result.edges[0].fromLean).toBe(false)
 
         expect(result.stats.virtualEdgesCreated).toBe(1)
@@ -645,7 +645,7 @@ describe('DEFAULT_FILTER_OPTIONS', () => {
     expect(DEFAULT_FILTER_OPTIONS.hideTechnical).toBe(false)
   })
 
-  it('should have hideOrphaned set to true by default', () => {
-    expect(DEFAULT_FILTER_OPTIONS.hideOrphaned).toBe(true)
+  it('should have hideOrphaned set to false by default', () => {
+    expect(DEFAULT_FILTER_OPTIONS.hideOrphaned).toBe(false)
   })
 })

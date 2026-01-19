@@ -22,8 +22,8 @@ describe('GraphFilterOptions UI', () => {
       expect(DEFAULT_FILTER_OPTIONS.transitiveReduction).toBe(true)
     })
 
-    it('should have hide orphaned enabled by default', () => {
-      expect(DEFAULT_FILTER_OPTIONS.hideOrphaned).toBe(true)
+    it('should have hide orphaned disabled by default', () => {
+      expect(DEFAULT_FILTER_OPTIONS.hideOrphaned).toBe(false)
     })
 
     it('should have hide technical disabled by default', () => {

@@ -19,7 +19,7 @@ export interface GraphFilterOptions {
 
 export const DEFAULT_FILTER_OPTIONS: GraphFilterOptions = {
   hideTechnical: false,
-  hideOrphaned: true,  // Default to true - orphaned nodes are usually not useful
+  hideOrphaned: false,  // Default to false - let users decide via settings panel
   transitiveReduction: true,  // Default to true - cleaner graphs
 }
 

@@ -368,6 +368,75 @@ class TestCanvasViewportOperations:
         viewport = storage.get_viewport()
         assert viewport.get("selected_node_id") is None
 
+    def test_get_viewport_default_filter_options(self, storage):
+        """Get default filter_options when none is set"""
+        viewport = storage.get_viewport()
+
+        assert "filter_options" in viewport
+        assert viewport["filter_options"]["hideTechnical"] is False
+        assert viewport["filter_options"]["hideOrphaned"] is False
+        assert viewport["filter_options"]["transitiveReduction"] is True
+
+    def test_set_filter_options(self, storage):
+        """Set filter_options in viewport"""
+        storage.update_viewport({
+            "filter_options": {
+                "hideTechnical": True,
+                "hideOrphaned": True,
+                "transitiveReduction": False,
+            }
+        })
+
+        viewport = storage.get_viewport()
+        assert viewport["filter_options"]["hideTechnical"] is True
+        assert viewport["filter_options"]["hideOrphaned"] is True
+        assert viewport["filter_options"]["transitiveReduction"] is False
+
+    def test_update_filter_options_partial(self, storage):
+        """Update only some filter_options fields"""
+        # Set initial filter_options
+        storage.update_viewport({
+            "filter_options": {
+                "hideTechnical": False,
+                "hideOrphaned": False,
+                "transitiveReduction": True,
+            }
+        })
+
+        # Update only hideTechnical
+        storage.update_viewport({
+            "filter_options": {
+                "hideTechnical": True,
+                "hideOrphaned": False,
+                "transitiveReduction": True,
+            }
+        })
+
+        viewport = storage.get_viewport()
+        assert viewport["filter_options"]["hideTechnical"] is True
+        assert viewport["filter_options"]["hideOrphaned"] is False
+        assert viewport["filter_options"]["transitiveReduction"] is True
+
+    def test_filter_options_persists_across_reload(self, storage, meta_path):
+        """Ensure filter_options persists when storage is reloaded"""
+        # Set filter_options
+        storage.update_viewport({
+            "filter_options": {
+                "hideTechnical": True,
+                "hideOrphaned": True,
+                "transitiveReduction": False,
+            }
+        })
+
+        # Create new storage instance (simulates app restart)
+        from astrolabe.unified_storage import UnifiedStorage
+        new_storage = UnifiedStorage({}, meta_path)
+
+        viewport = new_storage.get_viewport()
+        assert viewport["filter_options"]["hideTechnical"] is True
+        assert viewport["filter_options"]["hideOrphaned"] is True
+        assert viewport["filter_options"]["transitiveReduction"] is False
+
 
 class TestCanvasCoexistsWithMeta:
     """Test that canvas data coexists properly with other meta data"""
