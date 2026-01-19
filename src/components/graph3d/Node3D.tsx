@@ -57,6 +57,7 @@ interface Node3DProps {
   isDimmed?: boolean
   isClickable?: boolean  // Add edge mode, clickable hint for non-selected nodes
   isRemovable?: boolean  // Remove mode, removable hint for nodes (red pulse)
+  hasHiddenNeighbors?: boolean  // Node has hidden dependencies/dependents that can be expanded
   onSelect: () => void
   onHover: (hovered: boolean) => void
   onDragStart: () => void
@@ -79,6 +80,7 @@ export const Node3D = memo(function Node3D({
   isDimmed = false,
   isClickable = false,
   isRemovable = false,
+  hasHiddenNeighbors = false,
   onSelect,
   onHover,
   onDragStart,
@@ -89,6 +91,7 @@ export const Node3D = memo(function Node3D({
   const groupRef = useRef<THREE.Group>(null)
   const clickableGlowRef = useRef<THREE.Group>(null)
   const removableGlowRef = useRef<THREE.Group>(null)
+  const expandableGlowRef = useRef<THREE.Group>(null)
   const { gl } = useThree()
 
   // Get initial position
@@ -141,7 +144,7 @@ export const Node3D = memo(function Node3D({
     groupRef.current.scale.setScalar(newScale)
 
     // Only accumulate time when animation is needed
-    const needsAnimation = (isClickable && clickableGlowRef.current) || (isRemovable && removableGlowRef.current)
+    const needsAnimation = (isClickable && clickableGlowRef.current) || (isRemovable && removableGlowRef.current) || (hasHiddenNeighbors && expandableGlowRef.current)
     if (needsAnimation) {
       animTimeRef.current += delta
     }
@@ -165,6 +168,18 @@ export const Node3D = memo(function Node3D({
       for (let i = 0; i < children.length; i++) {
         const material = (children[i] as THREE.Mesh).material as THREE.MeshBasicMaterial
         const baseOpacity = i === 0 ? 0.5 : i === 1 ? 0.3 : 0.15
+        material.opacity = baseOpacity * pulse
+      }
+    }
+
+    // Expandable state glow animation - subtle breathing to indicate hidden neighbors
+    if (hasHiddenNeighbors && expandableGlowRef.current) {
+      const pulse = 0.7 + Math.sin(animTimeRef.current * 1.2) * 0.3  // 0.4 to 1.0 gentle breathing
+      const children = expandableGlowRef.current.children
+      for (let i = 0; i < children.length; i++) {
+        const material = (children[i] as THREE.Mesh).material as THREE.MeshBasicMaterial
+        // Brighter than normal to make node stand out
+        const baseOpacity = i === 0 ? 0.35 : 0.18
         material.opacity = baseOpacity * pulse
       }
     }
@@ -293,6 +308,34 @@ export const Node3D = memo(function Node3D({
               color={REMOVE_COLOR}
               transparent
               opacity={0.15}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+        </group>
+      )}
+
+      {/* Expandable state glow - node has hidden neighbors that can be revealed */}
+      {hasHiddenNeighbors && !isSelected && !isClickable && !isRemovable && !isDimmed && (
+        <group ref={expandableGlowRef}>
+          {/* Inner glow - uses node color for consistent visual */}
+          <mesh>
+            <sphereGeometry args={[size * 1.6, 32, 32]} />
+            <meshBasicMaterial
+              color={color}
+              transparent
+              opacity={0.35}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+          {/* Outer glow */}
+          <mesh>
+            <sphereGeometry args={[size * 2.2, 32, 32]} />
+            <meshBasicMaterial
+              color={color}
+              transparent
+              opacity={0.18}
               blending={THREE.AdditiveBlending}
               depthWrite={false}
             />

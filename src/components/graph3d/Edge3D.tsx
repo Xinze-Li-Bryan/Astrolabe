@@ -82,6 +82,8 @@ export const Edge3D = memo(function Edge3D({
 }: Edge3DProps) {
   const lineRef = useRef<Line2>(null)
   const curveLineRef = useRef<Line2>(null)
+  const glowOuterRef = useRef<Line2>(null)
+  const glowMiddleRef = useRef<Line2>(null)
 
   // Edge style
   const edgeStyle = edge.meta?.style ?? edge.defaultStyle
@@ -90,6 +92,7 @@ export const Edge3D = memo(function Edge3D({
   const isWavy = edgeStyle === 'wavy'
   const isZigzag = edgeStyle === 'zigzag'
   const isSpring = edgeStyle === 'spring'
+  const isGlow = edgeStyle === 'glow'  // Shortcut/virtual edge glow style
 
   // Get effect component
   const effectId = edge.meta?.effect
@@ -213,6 +216,14 @@ export const Edge3D = memo(function Edge3D({
         end[0], end[1], end[2]
       ])
       lineRef.current.geometry.setPositions(positions)
+
+      // Also update glow layers if they exist
+      if (glowOuterRef.current) {
+        glowOuterRef.current.geometry.setPositions(positions)
+      }
+      if (glowMiddleRef.current) {
+        glowMiddleRef.current.geometry.setPositions(positions)
+      }
     }
   })
 
@@ -376,6 +387,68 @@ export const Edge3D = memo(function Edge3D({
             start={currentStartRef.current}
             end={currentEndRef.current}
             color={color}
+            width={width}
+          />
+        )}
+      </>
+    )
+  }
+
+  // Render glow line (shortcut/virtual edges) - bright neon effect
+  if (isGlow) {
+    // Use edge default color for glow (typically cyan/teal)
+    const glowColor = isDimmed ? '#333333' : (edge.defaultColor || '#00ffcc')
+    const coreWidth = width
+    const outerWidth = width * 2.5  // Outer glow layer
+
+    return (
+      <>
+        {/* Outer glow layer - wider, semi-transparent */}
+        <Line
+          ref={glowOuterRef}
+          points={[startPos, endPos]}
+          color={glowColor}
+          lineWidth={outerWidth}
+          transparent
+          opacity={0.3}
+          onClick={onClick ? (e) => { e.stopPropagation(); onClick() } : undefined}
+          onPointerOver={onClick ? (e) => { e.stopPropagation(); document.body.style.cursor = 'pointer' } : undefined}
+          onPointerOut={onClick ? (e) => { e.stopPropagation(); document.body.style.cursor = 'auto' } : undefined}
+        />
+        {/* Middle glow layer */}
+        <Line
+          ref={glowMiddleRef}
+          points={[startPos, endPos]}
+          color={glowColor}
+          lineWidth={coreWidth * 1.5}
+          transparent
+          opacity={0.5}
+        />
+        {/* Core line - bright solid */}
+        <Line
+          ref={lineRef}
+          points={[startPos, endPos]}
+          color={glowColor}
+          lineWidth={coreWidth}
+        />
+        {/* Flow pulse - shown when highlighted */}
+        {showFlowPulse && (
+          <FlowPulse
+            start={currentStartRef.current}
+            end={currentEndRef.current}
+            color={glowColor}
+            width={width}
+            positionsRef={positionsRef}
+            sourceId={edge.source}
+            targetId={edge.target}
+          />
+        )}
+        {/* Edge effect */}
+        {EffectComponent && !isDimmed && (
+          <EffectComponent
+            start={currentStartRef.current}
+            end={currentEndRef.current}
+            color={glowColor}
             width={width}
           />
         )}

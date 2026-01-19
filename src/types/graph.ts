@@ -100,6 +100,9 @@ export interface AstrolabeEdge {
   effect?: string
   notes?: string
   visible: boolean
+
+  // Shortcut edge info (for virtual edges that skip technical nodes)
+  skippedNodes?: string[]  // IDs of technical nodes that this edge bypasses
 }
 
 // ============================================

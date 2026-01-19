@@ -133,8 +133,8 @@ export function processGraph(
       }
 
       // Create through-links for each technical node
-      const virtualEdges: AstrolabeEdge[] = []
-      const seenVirtualEdges = new Set<string>()
+      // Track which technical nodes each virtual edge skips
+      const virtualEdgeMap = new Map<string, { edge: AstrolabeEdge; skippedNodes: Set<string> }>()
       const existingEdgeKeys = new Set(currentEdges.map(e => `${e.source}->${e.target}`))
 
       for (const techId of technicalIds) {
@@ -150,23 +150,38 @@ export function processGraph(
             const edgeKey = `${inEdge.source}->${outEdge.target}`
             const virtualId = `virtual-${edgeKey}`
 
-            if (seenVirtualEdges.has(virtualId)) continue
             if (existingEdgeKeys.has(edgeKey)) continue
 
-            seenVirtualEdges.add(virtualId)
-            virtualEdges.push({
-              id: virtualId,
-              source: inEdge.source,
-              target: outEdge.target,
-              fromLean: false,
-              defaultColor: '#6b7280',
-              defaultWidth: 0.8,
-              defaultStyle: 'dashed',
-              style: 'dashed',
-              visible: true,
-            })
+            // If this virtual edge already exists, add the current techId to its skipped nodes
+            if (virtualEdgeMap.has(virtualId)) {
+              virtualEdgeMap.get(virtualId)!.skippedNodes.add(techId)
+            } else {
+              // Create new virtual edge
+              virtualEdgeMap.set(virtualId, {
+                edge: {
+                  id: virtualId,
+                  source: inEdge.source,
+                  target: outEdge.target,
+                  fromLean: false,
+                  defaultColor: '#00ffcc',  // Bright cyan/teal for shortcut edges
+                  defaultWidth: 2.5,        // Thicker line for visibility
+                  defaultStyle: 'glow',     // Glow style for shortcut visualization
+                  style: 'glow',
+                  visible: true,
+                  skippedNodes: [],  // Will be filled after iteration
+                },
+                skippedNodes: new Set([techId]),
+              })
+            }
           }
         }
+      }
+
+      // Convert map to array and fill in skippedNodes
+      const virtualEdges: AstrolabeEdge[] = []
+      for (const { edge, skippedNodes } of virtualEdgeMap.values()) {
+        edge.skippedNodes = Array.from(skippedNodes)
+        virtualEdges.push(edge)
       }
 
       currentNodes = currentNodes.filter(n => !technicalIds.has(n.id))
