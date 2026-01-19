@@ -1,5 +1,8 @@
 'use client'
 
+// Install global error handlers early to suppress known harmless errors (Monaco "Canceled", etc.)
+import '@/lib/errorSuppression'
+
 import { useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
