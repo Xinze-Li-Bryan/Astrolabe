@@ -56,6 +56,7 @@ Get started quickly with pre-configured Astrolabe templates:
 | [Strong PNT](https://github.com/Xinze-Li-Bryan/astrolabe-template-strongpnt) | Strong Prime Number Theorem (25k+ lines, 1.1k theorems) |
 | [Sphere Eversion](https://github.com/Xinze-Li-Bryan/astrolabe-template-sphere-eversion) | Proof of sphere eversion existence |
 | [Ramanujan-Nagell](https://github.com/Xinze-Li-Bryan/astrolabe-template-ramanujan-nagell) | Ramanujan-Nagell theorem formalization |
+| [I Ching](https://github.com/alerad/iching_) | Mathematical formalization of the I Ching hexagram structure |
 
 ## Why Astrolabe?
 
