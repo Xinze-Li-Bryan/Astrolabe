@@ -5,7 +5,7 @@
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
 [![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://docs.google.com/document/d/1_PEwX5i0S2YvkueV34L3_FujAZMZQlFs0jGGZNSrpqY/edit)
 [![Join Us](https://img.shields.io/badge/Join%20Us-Apply-orange)](https://docs.google.com/forms/d/e/1FAIpQLSe5EfHnKQaxNcTpRCUsjVszAmJCcjH7xIOENo6H4ayeW5KgEQ/viewform)
-[![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/watch?v=WJrw47W3OG0&list=PLSsZwlCw9byduhRCHDBPe1gt4WH46aixb)
+[![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/@xinzzzzz-v7i)
 
 ## Mission
 
