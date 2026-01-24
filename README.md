@@ -1,9 +1,11 @@
 # Astrolabe
 
-**Astrolabe is a growing open-source project that turns our collective vision for the future of mathematical interaction into reality. It belongs to everyone.**
+An open-source, AI-native interface framework for formal mathematics. Together with [OpenMath](https://openmath.shentu.org/), we are building infrastructure to accelerate the fusion of AI and mathematics — transforming mathematical knowledge into a universally accessible resource.
+
+*The future of mathematics is formal. The future of mathematics is open. The future of mathematics is for everyone.*
 
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
-[![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://docs.google.com/document/d/1_PEwX5i0S2YvkueV34L3_FujAZMZQlFs0jGGZNSrpqY/edit)
+[![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://github.com/Xinze-Li-Bryan/Astrolabe-Whitepaper)
 [![Join Us](https://img.shields.io/badge/Join%20Us-Apply-orange)](https://docs.google.com/forms/d/e/1FAIpQLSe5EfHnKQaxNcTpRCUsjVszAmJCcjH7xIOENo6H4ayeW5KgEQ/viewform)
 [![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/@xinzzzzz-v7i)
 
@@ -49,16 +51,17 @@ Astrolabe transforms your Lean 4 codebase into an explorable 3D universe. It par
 
 **Coming soon:** AI integration, LSP diagnostics, 2D view, more interaction modes.
 
-## Templates
+## Explore with Astrolabe
 
-Get started quickly with pre-configured Astrolabe templates:
+Lean projects you can explore with Astrolabe:
 
-| Template | Description |
-|----------|-------------|
+| Project | Description |
+|---------|-------------|
 | [Strong PNT](https://github.com/Xinze-Li-Bryan/astrolabe-template-strongpnt) | Strong Prime Number Theorem (25k+ lines, 1.1k theorems) |
 | [Sphere Eversion](https://github.com/Xinze-Li-Bryan/astrolabe-template-sphere-eversion) | Proof of sphere eversion existence |
 | [Ramanujan-Nagell](https://github.com/Xinze-Li-Bryan/astrolabe-template-ramanujan-nagell) | Ramanujan-Nagell theorem formalization |
 | [I Ching](https://github.com/alerad/iching_) | Mathematical formalization of the I Ching hexagram structure |
+| [Polynomial Method](https://github.com/NickAdfor/The-polynomial-method-and-restricted-sums-of-congruence-classes) | Polynomial method and restricted sums of congruence classes |
 
 ## Why Astrolabe?
 
