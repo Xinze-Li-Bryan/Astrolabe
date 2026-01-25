@@ -45,9 +45,12 @@ interface ForceGraph3DProps {
   selectedNodeId?: string | null
   focusNodeId?: string | null
   focusEdgeId?: string | null  // Focus on edge (source->target format)
+  focusClusterPosition?: [number, number, number] | null  // Focus on cluster centroid position
   highlightedEdge?: HighlightedEdge | null
+  highlightedNamespace?: { namespace: string; nodeIds: Set<string> } | null  // Highlight nodes in namespace
   onNodeSelect?: (node: Node | null) => void
   onEdgeSelect?: (edge: { id: string; source: string; target: string } | null) => void
+  onBackgroundClick?: () => void  // Called when clicking on empty canvas area
   showLabels?: boolean
   initialCameraPosition?: [number, number, number]
   initialCameraTarget?: [number, number, number]
@@ -56,6 +59,7 @@ interface ForceGraph3DProps {
   isAddingEdge?: boolean
   isRemovingNodes?: boolean  // Remove mode
   nodesWithHiddenNeighbors?: Set<string>  // Nodes that have hidden dependencies/dependents
+  getPositionsRef?: React.MutableRefObject<(() => Map<string, [number, number, number]>) | null>  // Ref to get current positions
 }
 
 // Camera focus control
@@ -374,7 +378,9 @@ function GraphScene({
   selectedNodeId,
   focusNodeId,
   focusEdgeId,
+  focusClusterPosition,
   highlightedEdge,
+  highlightedNamespace,
   onNodeSelect,
   onEdgeSelect,
   showLabels,
@@ -397,7 +403,9 @@ function GraphScene({
   selectedNodeId: string | null
   focusNodeId: string | null
   focusEdgeId: string | null
+  focusClusterPosition: [number, number, number] | null
   highlightedEdge: HighlightedEdge | null
+  highlightedNamespace: { namespace: string; nodeIds: Set<string> } | null
   onNodeSelect: (node: Node | null) => void
   onEdgeSelect: (edge: { id: string; source: string; target: string } | null) => void
   showLabels: boolean
@@ -426,6 +434,16 @@ function GraphScene({
   const shouldFocusEdge = focusEdgeId !== prevFocusEdgeId.current && focusEdgeId !== null
 
   useEffect(() => { prevFocusEdgeId.current = focusEdgeId }, [focusEdgeId])
+
+  // Cluster focus
+  const prevFocusClusterPosition = useRef<[number, number, number] | null>(null)
+  const shouldFocusCluster = focusClusterPosition !== null &&
+    (prevFocusClusterPosition.current === null ||
+     focusClusterPosition[0] !== prevFocusClusterPosition.current[0] ||
+     focusClusterPosition[1] !== prevFocusClusterPosition.current[1] ||
+     focusClusterPosition[2] !== prevFocusClusterPosition.current[2])
+
+  useEffect(() => { prevFocusClusterPosition.current = focusClusterPosition }, [focusClusterPosition])
 
   // Parse edge ID to get source and target positions
   const edgeFocusPositions = useMemo(() => {
@@ -550,6 +568,7 @@ function GraphScene({
       {layoutReady && nodes.map(node => {
         if (!positionsRef.current.has(node.id)) return null
         const isDimmedByEdge = highlightedEdge !== null && node.id !== highlightedEdge.source && node.id !== highlightedEdge.target
+        const isDimmedByNamespace = highlightedNamespace !== null && !highlightedNamespace.nodeIds.has(node.id)
         const isEdgeEndpoint = highlightedEdge !== null && (node.id === highlightedEdge.source || node.id === highlightedEdge.target)
         const hasHiddenNeighbors = nodesWithHiddenNeighbors?.has(node.id) ?? false
 
@@ -560,7 +579,7 @@ function GraphScene({
             positionsRef={positionsRef}
             isSelected={selectedNodeId === node.id || isEdgeEndpoint}
             isHovered={hoveredNodeId === node.id}
-            isDimmed={isDimmedByEdge}
+            isDimmed={isDimmedByEdge || isDimmedByNamespace}
             isClickable={isAddingEdge && selectedNodeId !== node.id}
             isRemovable={isRemovingNodes}
             hasHiddenNeighbors={hasHiddenNeighbors}
@@ -585,6 +604,7 @@ function GraphScene({
         rotateSpeed={0.5}
       />
       <CameraController targetPosition={focusPosition} enabled={shouldFocusNode} controlsRef={controlsRef} />
+      <CameraController targetPosition={focusClusterPosition} enabled={shouldFocusCluster} controlsRef={controlsRef} />
       <EdgeCameraController
         sourcePosition={edgeFocusPositions.source}
         targetPosition={edgeFocusPositions.target}
@@ -618,9 +638,12 @@ export function ForceGraph3D({
   selectedNodeId = null,
   focusNodeId = null,
   focusEdgeId = null,
+  focusClusterPosition = null,
   highlightedEdge = null,
+  highlightedNamespace = null,
   onNodeSelect,
   onEdgeSelect,
+  onBackgroundClick,
   showLabels = true,
   initialCameraPosition,
   initialCameraTarget,
@@ -629,8 +652,21 @@ export function ForceGraph3D({
   isAddingEdge = false,
   isRemovingNodes = false,
   nodesWithHiddenNeighbors,
+  getPositionsRef,
 }: ForceGraph3DProps) {
   const positionsRef = useRef<Map<string, [number, number, number]>>(new Map())
+
+  // Expose positions through ref
+  useEffect(() => {
+    if (getPositionsRef) {
+      getPositionsRef.current = () => new Map(positionsRef.current)
+    }
+    return () => {
+      if (getPositionsRef) {
+        getPositionsRef.current = null
+      }
+    }
+  }, [getPositionsRef])
   const [layoutStableTick, setLayoutStableTick] = useState(0)
   const [layoutReady, setLayoutReady] = useState(false)
   const hasShownLayout = useRef(false)
@@ -797,7 +833,7 @@ export function ForceGraph3D({
 
   return (
     <div className="w-full h-full bg-[#0a0a0f]">
-      <Canvas camera={{ position: [0, 0, 30], fov: 60 }} onPointerMissed={() => handleNodeSelect(null)}>
+      <Canvas camera={{ position: [0, 0, 30], fov: 60 }} onPointerMissed={() => { handleNodeSelect(null); onBackgroundClick?.() }}>
         <GraphScene
           nodes={allNodes}
           edges={allEdges}
@@ -805,7 +841,9 @@ export function ForceGraph3D({
           selectedNodeId={selectedNodeId}
           focusNodeId={focusNodeId}
           focusEdgeId={focusEdgeId}
+          focusClusterPosition={focusClusterPosition}
           highlightedEdge={highlightedEdge}
+          highlightedNamespace={highlightedNamespace}
           onNodeSelect={handleNodeSelect}
           onEdgeSelect={handleEdgeSelect}
           showLabels={showLabels}
