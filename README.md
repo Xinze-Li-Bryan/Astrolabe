@@ -2,14 +2,6 @@
 
 3D dependency graph visualizer for formal mathematics.
 
-**Created by Xinze Li**
-Fields Institute Centre for Mathematical AI | University of Toronto
-
-**Developed with** RiskLab Toronto
-**Integrated with** [OpenMath](https://openmath.shentu.org/) ecosystem (CertiK / Shentu Chain)
-
-Bridging formal mathematics with decentralized research infrastructure.
-
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
 [![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://github.com/Xinze-Li-Bryan/Astrolabe-Whitepaper)
 [![Join Us](https://img.shields.io/badge/Join%20Us-Apply-orange)](https://docs.google.com/forms/d/e/1FAIpQLSe5EfHnKQaxNcTpRCUsjVszAmJCcjH7xIOENo6H4ayeW5KgEQ/viewform)
@@ -267,6 +259,18 @@ Astrolabe stores project-specific data in `.astrolabe/` within each Lean project
 ## Contributors
 
 Thanks to all contributors who help make Astrolabe better!
+
+---
+
+## About
+
+**Created by Xinze Li**
+Fields Institute Centre for Mathematical AI | University of Toronto
+
+**Developed with** RiskLab Toronto
+**Integrated with** [OpenMath](https://openmath.shentu.org/) ecosystem (CertiK / Shentu Chain)
+
+Bridging formal mathematics with decentralized research infrastructure.
 
 ## License
 
