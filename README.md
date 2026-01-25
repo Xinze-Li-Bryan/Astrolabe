@@ -1,8 +1,14 @@
 # Astrolabe
 
-An open-source, AI-native interface framework for formal mathematics. Together with [OpenMath](https://openmath.shentu.org/), we are building infrastructure to accelerate the fusion of AI and mathematics — transforming mathematical knowledge into a universally accessible resource.
+3D dependency graph visualizer for formal mathematics.
 
-*The future of mathematics is formal. The future of mathematics is open. The future of mathematics is for everyone.*
+**Created by Xinze Li**
+Fields Institute Centre for Mathematical AI | University of Toronto
+
+**Developed with** RiskLab Toronto
+**Integrated with** [OpenMath](https://openmath.shentu.org/) ecosystem (CertiK / Shentu Chain)
+
+Bridging formal mathematics with decentralized research infrastructure.
 
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
 [![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://github.com/Xinze-Li-Bryan/Astrolabe-Whitepaper)
