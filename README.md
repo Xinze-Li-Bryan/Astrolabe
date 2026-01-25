@@ -1,6 +1,6 @@
 # Astrolabe
 
-An open-source, AI-native interface framework for formal mathematics. Together with [OpenMath](https://openmath.shentu.org/), we are building infrastructure to accelerate the fusion of AI and mathematics — transforming mathematical knowledge into a universally accessible resource.
+AI-native interface framework for formal mathematics. Together with [OpenMath](https://openmath.shentu.org/), we are building infrastructure to accelerate the fusion of AI and mathematics — transforming mathematical knowledge into a universally accessible resource.
 
 *The future of mathematics is formal. The future of mathematics is open. The future of mathematics is for everyone.*
 
