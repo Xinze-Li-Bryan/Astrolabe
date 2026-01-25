@@ -77,157 +77,22 @@ Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js 14, React 18, TypeScript |
-| Styling | Tailwind CSS |
-| State | Zustand |
-| 3D Rendering | Three.js, @react-three/fiber, @react-three/drei |
-| Graph Layout | Graphology, ForceAtlas2 |
-| Code Editor | Monaco Editor |
-| Math/Markdown | KaTeX, react-markdown, remark-gfm, rehype-katex |
-| Desktop | Tauri 2 (Rust) |
-| Backend | Python 3.11+, FastAPI, Uvicorn |
-| File Watching | watchfiles |
+Next.js, React, TypeScript, Three.js, Tauri (Rust), Python/FastAPI
 
 ## Installation
 
-### Requirements
-
-- Node.js >= 18
-- Python >= 3.11
-- Rust (for Tauri)
-- Lean 4 / Elan (for the projects you want to visualize)
-
-### Setup
-
 ```bash
-# Clone repository
 git clone https://github.com/Xinze-Li-Bryan/Astrolabe.git
 cd Astrolabe
-
-# Install frontend dependencies
 npm install
-
-# Install backend dependencies
 cd backend && pip install -e ".[dev]" && cd ..
 ```
 
 ## Usage
 
-### Development Mode
-
 ```bash
-# Launch frontend + backend together
-npm run dev:all
-
-# Or run separately:
-npm run backend   # Terminal 1: Backend at http://127.0.0.1:8765
-npm run dev       # Terminal 2: Frontend at http://localhost:3000
+npm run dev:all    # Launch frontend + backend
 ```
-
-### Building Desktop App (Release)
-
-```bash
-# One command to build everything
-./scripts/build-release.sh
-```
-
-This script automatically:
-1. Builds the Python backend as a standalone binary (PyInstaller)
-2. Configures Tauri for release build
-3. Builds the desktop application
-4. Restores dev configuration
-
-Output locations:
-- **macOS**: `src-tauri/target/release/bundle/dmg/`
-- **Windows**: `src-tauri/target/release/bundle/msi/` or `nsis/`
-- **Linux**: `src-tauri/target/release/bundle/deb/` or `appimage/`
-
-The release build bundles everything - end users don't need Python or Rust installed.
-
-### Testing
-
-```bash
-npm run test            # Frontend tests (Vitest)
-cd backend && pytest    # Backend tests
-```
-
-## Project Structure
-
-```
-astrolabe/
-├── src/                          # Frontend (Next.js)
-│   ├── app/
-│   │   ├── page.tsx              # Landing page
-│   │   └── local/edit/           # Main editor page
-│   ├── components/
-│   │   ├── graph3d/              # 3D visualization
-│   │   │   ├── ForceGraph3D.tsx  # Main graph container
-│   │   │   ├── ForceLayout.tsx   # Physics simulation
-│   │   │   ├── Node3D.tsx        # Node rendering
-│   │   │   ├── Edge3D.tsx        # Edge rendering
-│   │   │   └── effects/          # StatusRing, FlowPulse
-│   │   ├── SearchPanel.tsx       # Search & namespace browser
-│   │   ├── MonacoLeanEditor.tsx  # Code editor
-│   │   ├── LeanCodePanel.tsx     # Code panel wrapper
-│   │   └── MarkdownRenderer.tsx  # Notes with math
-│   ├── hooks/                    # useGraphData, useFileWatch, useProject
-│   ├── lib/
-│   │   ├── graphProcessing.ts    # Transitive reduction, clustering, filtering
-│   │   ├── canvasStore.ts        # Canvas state management
-│   │   └── store.ts              # Global state
-│   └── types/                    # TypeScript types
-│
-├── backend/astrolabe/            # Backend (FastAPI)
-│   ├── server.py                 # API endpoints
-│   ├── project.py                # Project management
-│   ├── graph_cache.py            # Declaration cache
-│   ├── canvas.py                 # Canvas state management
-│   ├── unified_storage.py        # Metadata storage
-│   ├── watcher.py                # File watching
-│   ├── parsers/                  # .ilean parsing
-│   └── models/                   # Data models (Node, Edge, State)
-│
-├── src-tauri/                    # Desktop app (Tauri)
-│   ├── src/lib.rs                # Sidecar management
-│   ├── tauri.conf.json           # Tauri configuration
-│   └── binaries/                 # Packaged backend binary
-│
-└── scripts/
-    └── build-backend.sh          # PyInstaller build script
-```
-
-## Data Storage
-
-Astrolabe stores project-specific data in `.astrolabe/` within each Lean project:
-
-| File | Content |
-|------|---------|
-| `meta.json` | Node/edge customizations, notes, virtual nodes |
-| `graph.json` | Parsed declaration cache |
-
-## API Reference
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/project/load` | POST | Load and parse Lean project |
-| `/api/project/search` | GET | Search declarations |
-| `/api/project/node/{id}` | GET | Get node details |
-| `/api/project/node/{id}/meta` | PATCH | Update node metadata |
-| `/api/canvas` | GET/POST | Load/save canvas state |
-| `/api/read-file` | POST | Read file content |
-| `/ws/watch` | WebSocket | File change notifications |
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl/Cmd + F` | Focus search |
-| `Escape` | Close panels |
-| Mouse drag | Rotate camera |
-| Scroll | Zoom |
-| Right-click drag | Pan |
 
 ## Contributors
 
