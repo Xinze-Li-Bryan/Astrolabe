@@ -69,40 +69,11 @@ Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses
 
 ## Features
 
-### 3D Force-Directed Graph
-- **Physics-Based Layout** — Nodes naturally organize by their connections
-- **Namespace Clustering** — Group nodes by Lean namespace with adjustable compactness and separation
-- **Density-Adaptive Springs** — High-degree hub nodes get longer edges to prevent star-shaped clustering
-- **Interactive Camera** — Orbit, zoom, pan; auto-focus on selected nodes
-- **Geometric Node Shapes** — Theorems (spheres), lemmas (tetrahedrons), definitions (boxes), axioms (icosahedrons)
-- **Multiple Edge Styles** — Solid, dashed, dotted, polyline, spring, wavy, zigzag
-
-### Graph Simplification
-- **Transitive Reduction** — Hide redundant edges (if A→B→C exists, hide A→C)
-- **Hide Technical** — Filter out internal/technical declarations
-- **Hide Orphaned** — Remove nodes with no connections
-
-### Lean Integration
-- **Auto-Parsing** — Reads `.ilean` compilation cache for fast extraction
-- **File Watching** — Automatic updates when you edit `.lean` files
-- **Sorry Detection** — Scans source for incomplete proofs
-
-### Search & Navigation
-- **Fuzzy Search** — Find declarations by name
-- **Namespace Browser** — Hierarchical A-Z → Namespace → Type grouping with depth selector
-- **Popularity Mode** — Browse by usage count (Hot/Common/Rare/Unused)
-- **Dependency Explorer** — View what a theorem uses and what uses it
-- **Auto-Expand** — Click a node on canvas to jump to it in the search panel
-
-### Canvas Management
-- **Focused Subgraphs** — Display only the nodes you care about
-- **Virtual Nodes** — Plan future theorems before implementing them
-- **Position Persistence** — Save 3D layouts and camera angles
-- **Node Pinning** — Lock nodes in place
-
-### Code & Notes
-- **Monaco Editor** — Lean 4 syntax highlighting
-- **Markdown Notes** — Per-node documentation with KaTeX math support
+- **3D Visualization** — Force-directed graph with physics-based layout and namespace clustering
+- **Lean Integration** — Auto-parsing, file watching, sorry detection
+- **Search & Navigation** — Fuzzy search, namespace browser, dependency explorer
+- **Canvas Management** — Focused subgraphs, virtual nodes, position persistence
+- **Code & Notes** — Monaco editor with Lean 4 syntax, markdown notes with KaTeX
 
 ## Tech Stack
 
