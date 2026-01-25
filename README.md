@@ -266,7 +266,7 @@ Thanks to all contributors who help make Astrolabe better!
 
 ## About
 
-**Created by Xinze Li**
+**Created by [Xinze Li](https://lixinze.xyz/)**
 Fields Institute Centre for Mathematical AI | University of Toronto
 
 ## License
