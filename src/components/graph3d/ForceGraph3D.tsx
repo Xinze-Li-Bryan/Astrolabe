@@ -15,6 +15,7 @@ import type { Node, Edge } from '@/types/node'
 import type { CustomNode, CustomEdge, Position3D } from '@/lib/canvasStore'
 import { useCanvasStore } from '@/lib/canvasStore'
 import ForceLayout, { PhysicsParams, DEFAULT_PHYSICS } from './ForceLayout'
+import DevPanel from '@/components/DevPanel'
 import {
   calculateBatchSpawnPositions,
   detectNodeChanges,
@@ -826,6 +827,7 @@ export function ForceGraph3D({
       <div className="absolute bottom-4 left-4 text-xs text-white/40 font-mono bg-black/60 px-2 py-1 rounded">
         {nodes.length} nodes{customNodes.length > 0 ? ` + ${customNodes.length} custom` : ''} | {edges.length} edges{customEdges.length > 0 ? ` + ${customEdges.length} custom` : ''} | 3D
       </div>
+      <DevPanel className="absolute top-4 right-4" />
     </div>
   )
 }

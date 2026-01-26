@@ -15,6 +15,15 @@ import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Node, Edge } from '@/lib/store'
 import {
+  isDevMode,
+  recordFrameStart,
+  recordPhysicsTime,
+  recordFrameEnd,
+  updateNodeEdgeCount,
+  updateStableFrames,
+  updateRendererInfo,
+} from '@/lib/devMode'
+import {
   groupNodesByNamespace,
   computeClusterCentroids,
   calculateClusterForce,
@@ -533,15 +542,25 @@ export function ForceLayout({
   }, [draggingNodeId, setDraggingNodeId, gl.domElement])
 
   useFrame((_, delta) => {
+    const devMode = isDevMode()
+    const frameStart = devMode ? recordFrameStart() : 0
+
     if (pendingWarmup.current && positionsRef.current.size > 0) {
       runWarmupIfNeeded('pending')
     }
 
     const positions = positionsRef.current
-    if (!positions || positions.size === 0 || !running) return
+    if (!positions || positions.size === 0 || !running) {
+      if (devMode) recordFrameEnd(frameStart)
+      return
+    }
 
     // Skip frames after stable to reduce CPU usage
     if (!draggingNodeId && stableFrames.current > 60) {
+      if (devMode) {
+        updateStableFrames(stableFrames.current)
+        recordFrameEnd(frameStart)
+      }
       return
     }
 
@@ -582,6 +601,7 @@ export function ForceLayout({
     }
 
     // Physics simulation
+    const physicsStart = devMode ? performance.now() : 0
     const dt = Math.min(delta, 0.05)
     const newPositions = new Map(positions)
 
@@ -794,6 +814,22 @@ export function ForceLayout({
         hasTriggeredStable.current = true
         onStable()
       }
+    }
+
+    // Dev mode metrics
+    if (devMode) {
+      recordPhysicsTime(physicsStart)
+      updateNodeEdgeCount(nodes.length, edges.length)
+      updateStableFrames(stableFrames.current)
+      // Three.js renderer stats
+      const info = gl.info
+      updateRendererInfo({
+        drawCalls: info.render.calls,
+        triangles: info.render.triangles,
+        geometries: info.memory.geometries,
+        textures: info.memory.textures,
+      })
+      recordFrameEnd(frameStart)
     }
   })
 
