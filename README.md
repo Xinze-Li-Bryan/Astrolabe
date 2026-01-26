@@ -1,11 +1,13 @@
 # Astrolabe
 
-**Astrolabe is a growing open-source project that turns our collective vision for the future of mathematical interaction into reality. It belongs to everyone.**
+AI-native interface framework for formal mathematics. Together with [OpenMath](https://openmath.shentu.org/), we are building infrastructure to accelerate the fusion of AI and mathematics — transforming mathematical knowledge into a universally accessible resource.
+
+*The future of mathematics is formal. The future of mathematics is open. The future of mathematics is for everyone.*
 
 [![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
-[![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://docs.google.com/document/d/1_PEwX5i0S2YvkueV34L3_FujAZMZQlFs0jGGZNSrpqY/edit)
+[![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://github.com/Xinze-Li-Bryan/Astrolabe-Whitepaper)
 [![Join Us](https://img.shields.io/badge/Join%20Us-Apply-orange)](https://docs.google.com/forms/d/e/1FAIpQLSe5EfHnKQaxNcTpRCUsjVszAmJCcjH7xIOENo6H4ayeW5KgEQ/viewform)
-[![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/watch?v=WJrw47W3OG0&list=PLSsZwlCw9byduhRCHDBPe1gt4WH46aixb)
+[![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/@xinzzzzz-v7i)
 
 ## Mission
 
@@ -49,16 +51,17 @@ Astrolabe transforms your Lean 4 codebase into an explorable 3D universe. It par
 
 **Coming soon:** AI integration, LSP diagnostics, 2D view, more interaction modes.
 
-## Templates
+## Explore with Astrolabe
 
-Get started quickly with pre-configured Astrolabe templates:
+Lean projects you can explore with Astrolabe:
 
-| Template | Description |
-|----------|-------------|
+| Project | Description |
+|---------|-------------|
 | [Strong PNT](https://github.com/Xinze-Li-Bryan/astrolabe-template-strongpnt) | Strong Prime Number Theorem (25k+ lines, 1.1k theorems) |
 | [Sphere Eversion](https://github.com/Xinze-Li-Bryan/astrolabe-template-sphere-eversion) | Proof of sphere eversion existence |
 | [Ramanujan-Nagell](https://github.com/Xinze-Li-Bryan/astrolabe-template-ramanujan-nagell) | Ramanujan-Nagell theorem formalization |
 | [I Ching](https://github.com/alerad/iching_) | Mathematical formalization of the I Ching hexagram structure |
+| [Polynomial Method](https://github.com/NickAdfor/The-polynomial-method-and-restricted-sums-of-congruence-classes) | Polynomial method and restricted sums of congruence classes |
 
 ## Why Astrolabe?
 
@@ -66,198 +69,41 @@ Lean 4 projects grow into thousands of interconnected theorems. Astrolabe parses
 
 ## Features
 
-### 3D Force-Directed Graph
-- **Physics-Based Layout** — Nodes naturally organize by their connections
-- **Namespace Clustering** — Group nodes by Lean namespace with adjustable compactness and separation
-- **Density-Adaptive Springs** — High-degree hub nodes get longer edges to prevent star-shaped clustering
-- **Interactive Camera** — Orbit, zoom, pan; auto-focus on selected nodes
-- **Geometric Node Shapes** — Theorems (spheres), lemmas (tetrahedrons), definitions (boxes), axioms (icosahedrons)
-- **Multiple Edge Styles** — Solid, dashed, dotted, polyline, spring, wavy, zigzag
-
-### Graph Simplification
-- **Transitive Reduction** — Hide redundant edges (if A→B→C exists, hide A→C)
-- **Hide Technical** — Filter out internal/technical declarations
-- **Hide Orphaned** — Remove nodes with no connections
-
-### Lean Integration
-- **Auto-Parsing** — Reads `.ilean` compilation cache for fast extraction
-- **File Watching** — Automatic updates when you edit `.lean` files
-- **Sorry Detection** — Scans source for incomplete proofs
-
-### Search & Navigation
-- **Fuzzy Search** — Find declarations by name
-- **Namespace Browser** — Hierarchical A-Z → Namespace → Type grouping with depth selector
-- **Popularity Mode** — Browse by usage count (Hot/Common/Rare/Unused)
-- **Dependency Explorer** — View what a theorem uses and what uses it
-- **Auto-Expand** — Click a node on canvas to jump to it in the search panel
-
-### Canvas Management
-- **Focused Subgraphs** — Display only the nodes you care about
-- **Virtual Nodes** — Plan future theorems before implementing them
-- **Position Persistence** — Save 3D layouts and camera angles
-- **Node Pinning** — Lock nodes in place
-
-### Code & Notes
-- **Monaco Editor** — Lean 4 syntax highlighting
-- **Markdown Notes** — Per-node documentation with KaTeX math support
+- **3D Visualization** — Force-directed graph with physics-based layout and namespace clustering
+- **Lean Integration** — Auto-parsing, file watching, sorry detection
+- **Search & Navigation** — Fuzzy search, namespace browser, dependency explorer
+- **Canvas Management** — Focused subgraphs, virtual nodes, position persistence
+- **Code & Notes** — Monaco editor with Lean 4 syntax, markdown notes with KaTeX
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js 14, React 18, TypeScript |
-| Styling | Tailwind CSS |
-| State | Zustand |
-| 3D Rendering | Three.js, @react-three/fiber, @react-three/drei |
-| Graph Layout | Graphology, ForceAtlas2 |
-| Code Editor | Monaco Editor |
-| Math/Markdown | KaTeX, react-markdown, remark-gfm, rehype-katex |
-| Desktop | Tauri 2 (Rust) |
-| Backend | Python 3.11+, FastAPI, Uvicorn |
-| File Watching | watchfiles |
+Next.js, React, TypeScript, Three.js, Tauri (Rust), Python/FastAPI
 
 ## Installation
 
-### Requirements
-
-- Node.js >= 18
-- Python >= 3.11
-- Rust (for Tauri)
-- Lean 4 / Elan (for the projects you want to visualize)
-
-### Setup
-
 ```bash
-# Clone repository
 git clone https://github.com/Xinze-Li-Bryan/Astrolabe.git
 cd Astrolabe
-
-# Install frontend dependencies
 npm install
-
-# Install backend dependencies
 cd backend && pip install -e ".[dev]" && cd ..
 ```
 
 ## Usage
 
-### Development Mode
-
 ```bash
-# Launch frontend + backend together
-npm run dev:all
-
-# Or run separately:
-npm run backend   # Terminal 1: Backend at http://127.0.0.1:8765
-npm run dev       # Terminal 2: Frontend at http://localhost:3000
+npm run dev:all    # Launch frontend + backend
 ```
-
-### Building Desktop App (Release)
-
-```bash
-# One command to build everything
-./scripts/build-release.sh
-```
-
-This script automatically:
-1. Builds the Python backend as a standalone binary (PyInstaller)
-2. Configures Tauri for release build
-3. Builds the desktop application
-4. Restores dev configuration
-
-Output locations:
-- **macOS**: `src-tauri/target/release/bundle/dmg/`
-- **Windows**: `src-tauri/target/release/bundle/msi/` or `nsis/`
-- **Linux**: `src-tauri/target/release/bundle/deb/` or `appimage/`
-
-The release build bundles everything - end users don't need Python or Rust installed.
-
-### Testing
-
-```bash
-npm run test            # Frontend tests (Vitest)
-cd backend && pytest    # Backend tests
-```
-
-## Project Structure
-
-```
-astrolabe/
-├── src/                          # Frontend (Next.js)
-│   ├── app/
-│   │   ├── page.tsx              # Landing page
-│   │   └── local/edit/           # Main editor page
-│   ├── components/
-│   │   ├── graph3d/              # 3D visualization
-│   │   │   ├── ForceGraph3D.tsx  # Main graph container
-│   │   │   ├── ForceLayout.tsx   # Physics simulation
-│   │   │   ├── Node3D.tsx        # Node rendering
-│   │   │   ├── Edge3D.tsx        # Edge rendering
-│   │   │   └── effects/          # StatusRing, FlowPulse
-│   │   ├── SearchPanel.tsx       # Search & namespace browser
-│   │   ├── MonacoLeanEditor.tsx  # Code editor
-│   │   ├── LeanCodePanel.tsx     # Code panel wrapper
-│   │   └── MarkdownRenderer.tsx  # Notes with math
-│   ├── hooks/                    # useGraphData, useFileWatch, useProject
-│   ├── lib/
-│   │   ├── graphProcessing.ts    # Transitive reduction, clustering, filtering
-│   │   ├── canvasStore.ts        # Canvas state management
-│   │   └── store.ts              # Global state
-│   └── types/                    # TypeScript types
-│
-├── backend/astrolabe/            # Backend (FastAPI)
-│   ├── server.py                 # API endpoints
-│   ├── project.py                # Project management
-│   ├── graph_cache.py            # Declaration cache
-│   ├── canvas.py                 # Canvas state management
-│   ├── unified_storage.py        # Metadata storage
-│   ├── watcher.py                # File watching
-│   ├── parsers/                  # .ilean parsing
-│   └── models/                   # Data models (Node, Edge, State)
-│
-├── src-tauri/                    # Desktop app (Tauri)
-│   ├── src/lib.rs                # Sidecar management
-│   ├── tauri.conf.json           # Tauri configuration
-│   └── binaries/                 # Packaged backend binary
-│
-└── scripts/
-    └── build-backend.sh          # PyInstaller build script
-```
-
-## Data Storage
-
-Astrolabe stores project-specific data in `.astrolabe/` within each Lean project:
-
-| File | Content |
-|------|---------|
-| `meta.json` | Node/edge customizations, notes, virtual nodes |
-| `graph.json` | Parsed declaration cache |
-
-## API Reference
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/project/load` | POST | Load and parse Lean project |
-| `/api/project/search` | GET | Search declarations |
-| `/api/project/node/{id}` | GET | Get node details |
-| `/api/project/node/{id}/meta` | PATCH | Update node metadata |
-| `/api/canvas` | GET/POST | Load/save canvas state |
-| `/api/read-file` | POST | Read file content |
-| `/ws/watch` | WebSocket | File change notifications |
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl/Cmd + F` | Focus search |
-| `Escape` | Close panels |
-| Mouse drag | Rotate camera |
-| Scroll | Zoom |
-| Right-click drag | Pan |
 
 ## Contributors
 
 Thanks to all contributors who help make Astrolabe better!
+
+---
+
+## About
+
+**Created by [Xinze Li](https://lixinze.xyz/)**
+Fields Institute Centre for Mathematical AI | University of Toronto
 
 ## License
 

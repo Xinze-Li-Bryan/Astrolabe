@@ -27,6 +27,10 @@ const HARMLESS_ERROR_PATTERNS: Array<{
     description: 'Monaco Editor async operation cancelled during unmount',
   },
   {
+    pattern: 'Canceled: Canceled',
+    description: 'Monaco Editor dispose error with full message',
+  },
+  {
     pattern: /ResizeObserver loop/,
     description: 'Browser ResizeObserver throttling - harmless layout warning',
   },
@@ -81,6 +85,11 @@ let installed = false;
 /**
  * Install global error handlers to suppress known harmless errors.
  * Safe to call multiple times - will only install once.
+ *
+ * This patches multiple layers:
+ * 1. Window error events
+ * 2. Unhandled promise rejections
+ * 3. Console.error (to prevent Next.js error overlay from showing harmless errors)
  */
 export function installGlobalErrorHandlers(): void {
   if (installed) return;
@@ -104,6 +113,39 @@ export function installGlobalErrorHandlers(): void {
   // Use capture phase to intercept before React's error boundary
   window.addEventListener('error', handleError, true);
   window.addEventListener('unhandledrejection', handleUnhandledRejection, true);
+
+  // Patch console.error to filter out harmless errors
+  // This prevents Next.js error overlay from showing Monaco "Canceled" errors
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    // Check if any argument is a harmless error
+    const hasHarmlessError = args.some(arg => {
+      if (isHarmlessError(arg)) return true;
+      // Check string arguments that might contain error messages
+      if (typeof arg === 'string' && HARMLESS_ERROR_PATTERNS.some(({ pattern }) => {
+        if (typeof pattern === 'string') return arg.includes(pattern);
+        return pattern.test(arg);
+      })) return true;
+      return false;
+    });
+
+    if (hasHarmlessError) {
+      return; // Suppress the error
+    }
+
+    originalConsoleError.apply(console, args);
+  };
+
+  // Patch reportError if it exists (used by some browsers and frameworks)
+  if (typeof window.reportError === 'function') {
+    const originalReportError = window.reportError;
+    window.reportError = (error: unknown) => {
+      if (isHarmlessError(error)) {
+        return;
+      }
+      originalReportError(error);
+    };
+  }
 
   installed = true;
 }
