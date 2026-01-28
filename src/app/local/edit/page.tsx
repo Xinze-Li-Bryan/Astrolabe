@@ -75,6 +75,7 @@ import { useLensStore } from '@/lib/lensStore'
 
 // Import undo system
 import { useUndoShortcut } from '@/hooks/useUndoShortcut'
+import { graphActions } from '@/lib/history/graphActions'
 
 
 const getStatusLabel = (status: string) => {
@@ -424,19 +425,34 @@ function LocalEditorContent() {
     // Auto-save note when it changes (with debounce)
     // Uniformly store to backend meta.json, no longer use frontend local config
     const saveNoteTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    const originalNoteRef = useRef<string>('') // Track original value for undo
     const handleNoteChange = useCallback((value: string) => {
+        // Capture original value on first change (for undo)
+        if (!saveNoteTimeoutRef.current && selectedNode) {
+            originalNoteRef.current = selectedNode.notes || ''
+        }
+
         setEditingNote(value)
         // Debounce auto-save
         if (saveNoteTimeoutRef.current) {
             clearTimeout(saveNoteTimeoutRef.current)
         }
         if (selectedNode && projectPath) {
+            const nodeId = selectedNode.id
+            const oldNotes = originalNoteRef.current
+
             saveNoteTimeoutRef.current = setTimeout(async () => {
-                // Only save to backend meta.json
+                // Use undoable action for save
                 try {
-                    await updateNodeMeta(projectPath, selectedNode.id, {
-                        notes: value || undefined, // Empty value passes undefined which will delete the field
-                    })
+                    await graphActions.updateNodeMeta(
+                        projectPath,
+                        nodeId,
+                        { notes: value || undefined },
+                        { notes: oldNotes || undefined },
+                        'Edit notes'
+                    )
+                    // Reset original ref after successful save
+                    originalNoteRef.current = value
                 } catch (err) {
                     console.error('[handleNoteChange] Failed to sync note to backend:', err)
                 }
@@ -477,40 +493,60 @@ function LocalEditorContent() {
     const handleStyleChange = useCallback(async (nodeId: string, style: { effect?: string; size?: number }) => {
         console.log('[handleStyleChange]', { nodeId, style })
         if (!projectPath) return
+
+        // Get old values for undo
+        const node = graphNodes.find(n => n.id === nodeId)
+        const oldStyle = {
+            effect: node?.customEffect,
+            size: node?.customSize,
+        }
+
         try {
-            // Call backend API to save meta
-            await updateNodeMeta(projectPath, nodeId, {
-                size: style.size,
-                effect: style.effect,
-            })
+            // Use undoable action for style changes
+            await graphActions.updateNodeMeta(
+                projectPath,
+                nodeId,
+                { size: style.size, effect: style.effect },
+                { size: oldStyle.size, effect: oldStyle.effect },
+                'Change node style'
+            )
             // Refresh data to display new style
-            // reloadMeta refreshes Lean nodes, loadCanvas refreshes custom nodes
             console.log('[handleStyleChange] Refreshing meta after update...')
             reloadMeta()
             loadCanvas()
         } catch (err) {
             console.error('[handleStyleChange] Failed to update node meta:', err)
         }
-    }, [projectPath, reloadMeta, loadCanvas])
+    }, [projectPath, reloadMeta, loadCanvas, graphNodes])
 
     // Handle edge style change from EdgeStylePanel
     const handleEdgeStyleChange = useCallback(async (edgeId: string, style: { effect?: string; style?: string }) => {
         console.log('[handleEdgeStyleChange]', { edgeId, style })
         if (!projectPath) return
+
+        // Get old values for undo
+        const edge = astrolabeEdges.find(e => e.id === edgeId) || customEdges.find(e => e.id === edgeId)
+        const oldStyle = {
+            effect: edge?.effect,
+            style: edge?.style,
+        }
+
         try {
-            // Call backend API to save edge meta
-            await updateEdgeMeta(projectPath, edgeId, {
-                effect: style.effect,
-                style: style.style,
-            })
+            // Use undoable action for edge style changes
+            await graphActions.updateEdgeMeta(
+                projectPath,
+                edgeId,
+                { effect: style.effect, style: style.style },
+                { effect: oldStyle.effect, style: oldStyle.style },
+                'Change edge style'
+            )
             // Refresh data to display new styles
-            // reloadMeta refreshes regular edges, loadCanvas refreshes custom edges
             reloadMeta()
             loadCanvas()
         } catch (err) {
             console.error('[handleEdgeStyleChange] Failed to update edge meta:', err)
         }
-    }, [projectPath, reloadMeta, loadCanvas])
+    }, [projectPath, reloadMeta, loadCanvas, astrolabeEdges, customEdges])
 
     // Toggle code viewer
     const handleToggleCodeViewer = useCallback(() => {

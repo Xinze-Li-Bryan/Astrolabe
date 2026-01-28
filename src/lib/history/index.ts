@@ -28,4 +28,5 @@
 export { history, HistoryManager } from './HistoryManager'
 export { PatchCommand, createCommand } from './PatchCommand'
 export { withUndo, undoable, transaction } from './withUndo'
+export { graphActions } from './graphActions'
 export type { Command, CommandScope, ExecuteOptions, HistoryState, HistoryListener } from './types'
