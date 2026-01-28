@@ -45,9 +45,10 @@ export async function updateNodeMetaUndoable(
 ): Promise<void> {
   // Determine what's being changed for the label
   const changedFields = Object.keys(newMeta)
+  const nodeName = nodeId.split('.').pop() || nodeId
   const defaultLabel = changedFields.length === 1
-    ? `Update ${changedFields[0]}`
-    : `Update node meta`
+    ? `Edit ${changedFields[0]}: ${nodeName}`
+    : `Edit ${nodeName} meta`
 
   await undoable(
     'graph',
@@ -92,9 +93,11 @@ export async function updateEdgeMetaUndoable(
   label?: string
 ): Promise<void> {
   const changedFields = Object.keys(newMeta)
+  // Try to extract meaningful edge name from ID (format: source->target)
+  const edgeName = edgeId.includes('->') ? edgeId.split('->').map(s => s.split('.').pop()).join('→') : edgeId
   const defaultLabel = changedFields.length === 1
-    ? `Update edge ${changedFields[0]}`
-    : `Update edge meta`
+    ? `Edit edge ${changedFields[0]}: ${edgeName}`
+    : `Edit edge: ${edgeName}`
 
   await undoable(
     'graph',
@@ -244,6 +247,9 @@ export async function deleteCustomNodeUndoable(
 
 /**
  * Undoable create custom edge
+ *
+ * The edge is created inside do() so redo works correctly.
+ * Edge ID is stored in closure and updated on each redo.
  */
 export async function createCustomEdgeUndoable(
   source: string,
@@ -251,38 +257,35 @@ export async function createCustomEdgeUndoable(
   existingEdges: Array<{ source: string; target: string }>
 ): Promise<string | null> {
   const store = getCanvasStore()
-  let createdEdgeId: string | null = null
+  const sourceName = source.split('.').pop() || source
+  const targetName = target.split('.').pop() || target
 
-  // We need to execute and capture the created edge ID
-  // This is a bit tricky because we need the ID for undo
-  const result = await store.addCustomEdge(source, target, existingEdges)
+  // Mutable closure to track the current edge ID
+  // Updated on initial create and each redo
+  let currentEdgeId: string | null = null
 
-  if (result.edge) {
-    createdEdgeId = result.edge.id
-
-    // Now register the undo action (the edge is already created)
-    // We use a manual command since the action already happened
-    const command = {
-      id: `create-edge-${Date.now()}`,
-      label: `Create edge`,
-      scope: 'canvas' as const,
-      timestamp: Date.now(),
-      do: async () => {
-        // Edge already created, this is for redo
-        await store.addCustomEdge(source, target, existingEdges)
-      },
-      undo: async () => {
-        if (createdEdgeId) {
-          await store.removeCustomEdge(createdEdgeId)
-        }
-      },
-    }
-
-    // Add to history (skip execute since already done)
-    history.execute(command, { skipHistory: false })
+  const command = {
+    id: `create-edge-${Date.now()}`,
+    label: `Create edge: ${sourceName}→${targetName}`,
+    scope: 'canvas' as const,
+    timestamp: Date.now(),
+    do: async () => {
+      const result = await store.addCustomEdge(source, target, existingEdges)
+      if (result.edge) {
+        currentEdgeId = result.edge.id
+      }
+    },
+    undo: async () => {
+      if (currentEdgeId) {
+        await store.removeCustomEdge(currentEdgeId)
+      }
+    },
   }
 
-  return createdEdgeId
+  // Execute through history (this calls do() and records for undo)
+  await history.execute(command)
+
+  return currentEdgeId
 }
 
 /**
@@ -295,10 +298,12 @@ export async function deleteCustomEdgeUndoable(
   existingEdges: Array<{ source: string; target: string }>
 ): Promise<void> {
   const store = getCanvasStore()
+  const sourceName = source.split('.').pop() || source
+  const targetName = target.split('.').pop() || target
 
   await undoable(
     'canvas',
-    `Delete edge`,
+    `Delete edge: ${sourceName}→${targetName}`,
     async () => {
       await store.removeCustomEdge(edgeId)
     },

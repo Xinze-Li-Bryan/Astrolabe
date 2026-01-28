@@ -15,9 +15,10 @@ import { history, PatchCommand, type CommandScope } from './index'
 // Enable Immer patches globally
 enablePatches()
 
+// Compatible with both Zustand StoreApi and UseBoundStore
 type StoreApi<T> = {
   getState: () => T
-  setState: (partial: T | Partial<T> | ((state: T) => T | Partial<T>), replace?: boolean) => void
+  setState: (state: T, replace: true) => void
 }
 
 /**

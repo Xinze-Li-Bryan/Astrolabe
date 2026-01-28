@@ -12,25 +12,29 @@ import type { LensOptions } from '@/lib/lenses/types'
 /**
  * Change lens options (nHop, namespaceDepth, collapseThreshold, etc.)
  * Undoable and mergeable for slider interactions.
+ *
+ * @param newOptions - Partial options to merge
+ * @param optionKey - Key for merging consecutive changes (e.g., 'nHop')
  */
 export async function setLensOptionsUndoable(
   newOptions: Partial<LensOptions>,
   optionKey?: string // For merging consecutive changes to same option
 ): Promise<void> {
   const store = useLensStore
-  const oldOptions = { ...store.getState().options }
   const label = optionKey
     ? `Change ${optionKey}`
     : 'Change lens options'
 
-  await undoable(
-    'lens',
-    label,
-    () => store.setState(state => ({
-      options: { ...state.options, ...newOptions }
-    })),
-    () => store.setState({ options: oldOptions })
-  )
+  // Use withUndo with merge support for high-frequency slider interactions
+  const update = withUndo(store, 'lens', label, {
+    tryMerge: !!optionKey, // Only merge if optionKey specified
+    mergeKey: 'lensOption',
+    mergeValue: optionKey,
+  })
+
+  await update(draft => {
+    Object.assign(draft.options, newOptions)
+  })
 }
 
 /**
@@ -39,15 +43,17 @@ export async function setLensOptionsUndoable(
 export async function toggleGroupExpandedUndoable(groupId: string): Promise<void> {
   const store = useLensStore
   const wasExpanded = store.getState().expandedGroups.has(groupId)
+  const groupName = groupId.replace('group:', '').split('.').pop() || groupId
   const label = wasExpanded
-    ? `Collapse ${groupId.replace('group:', '')}`
-    : `Expand ${groupId.replace('group:', '')}`
+    ? `Collapse: ${groupName}`
+    : `Expand: ${groupName}`
 
   await undoable(
     'lens',
     label,
     () => {
-      const newExpanded = new Set(store.getState().expandedGroups)
+      const current = store.getState().expandedGroups
+      const newExpanded = new Set(current)
       if (wasExpanded) {
         newExpanded.delete(groupId)
       } else {
@@ -56,7 +62,8 @@ export async function toggleGroupExpandedUndoable(groupId: string): Promise<void
       store.setState({ expandedGroups: newExpanded })
     },
     () => {
-      const newExpanded = new Set(store.getState().expandedGroups)
+      const current = store.getState().expandedGroups
+      const newExpanded = new Set(current)
       if (wasExpanded) {
         newExpanded.add(groupId)
       } else {

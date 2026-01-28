@@ -75,6 +75,8 @@ import { useLensStore } from '@/lib/lensStore'
 // Import undo system
 import { useUndoShortcut } from '@/hooks/useUndoShortcut'
 import { graphActions } from '@/lib/history/graphActions'
+import { useSelectionStore } from '@/lib/selectionStore'
+import { highlightNamespaceUndoable, clearHighlightUndoable } from '@/lib/history/selectionActions'
 
 
 const getStatusLabel = (status: string) => {
@@ -131,7 +133,8 @@ function LocalEditorContent() {
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
     const [focusClusterPosition, setFocusClusterPosition] = useState<[number, number, number] | null>(null) // Cluster centroid to focus on
-    const [highlightedNamespace, setHighlightedNamespace] = useState<{ namespace: string; nodeIds: Set<string> } | null>(null) // Highlighted namespace for dimming
+    // Namespace highlighting (via selectionStore, undoable)
+    const highlightedNamespace = useSelectionStore(state => state.highlightedNamespace)
     const [showLabels, setShowLabels] = useState(true) // Whether to show node labels
     const getPositionsRef = useRef<(() => Map<string, [number, number, number]>) | null>(null) // Ref to get positions from ForceGraph3D
 
@@ -916,7 +919,7 @@ function LocalEditorContent() {
 
         if (count > 0) {
             setFocusClusterPosition([sumX / count, sumY / count, sumZ / count])
-            setHighlightedNamespace({ namespace, nodeIds })
+            highlightNamespaceUndoable(namespace, nodeIds)
         }
     }, [canvasNodes, physics.clusteringDepth])
 
@@ -1862,13 +1865,13 @@ function LocalEditorContent() {
                                     onNodeSelect={(node) => {
                                         // Only clear namespace highlight if clicking a node outside the highlighted namespace
                                         if (highlightedNamespace && node && !highlightedNamespace.nodeIds.has(node.id)) {
-                                            setHighlightedNamespace(null)
+                                            clearHighlightUndoable()
                                             setFocusClusterPosition(null)
                                         }
                                         handleCanvasNodeClick(node)
                                     }}
                                     onBackgroundClick={() => {
-                                        setHighlightedNamespace(null) // Clear namespace highlight when clicking empty area
+                                        clearHighlightUndoable() // Clear namespace highlight when clicking empty area
                                         setFocusClusterPosition(null) // Clear cluster focus
                                     }}
                                     onEdgeSelect={handleEdgeSelect}

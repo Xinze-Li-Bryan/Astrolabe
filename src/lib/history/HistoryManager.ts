@@ -90,8 +90,12 @@ export class HistoryManager {
    */
   async undo(): Promise<boolean> {
     const command = this.undoStack.pop()
-    if (!command) return false
+    if (!command) {
+      console.log('[HistoryManager] undo() - no commands in stack')
+      return false
+    }
 
+    console.log(`[HistoryManager] undo() - undoing: "${command.label}"`)
     this.isReplaying = true
     try {
       await command.undo()
@@ -218,6 +222,16 @@ export class HistoryManager {
    */
   enableScope(scope: CommandScope): void {
     this.disabledScopes.delete(scope)
+  }
+
+  /**
+   * Check if currently replaying (during undo/redo)
+   *
+   * Use this to skip side effects (like clearing history on websocket events)
+   * during undo/redo operations.
+   */
+  get replaying(): boolean {
+    return this.isReplaying
   }
 
   /**
