@@ -73,6 +73,9 @@ import { LensIndicator } from '@/components/LensIndicator'
 import { useLensPickerShortcut } from '@/hooks/useLensPickerShortcut'
 import { useLensStore } from '@/lib/lensStore'
 
+// Import undo system
+import { useUndoShortcut } from '@/hooks/useUndoShortcut'
+
 
 const getStatusLabel = (status: string) => {
     switch (status) {
@@ -135,6 +138,9 @@ function LocalEditorContent() {
 
     // Lens picker (Cmd+K)
     const { isOpen: isLensPickerOpen, open: openLensPicker, close: closeLensPicker } = useLensPickerShortcut()
+
+    // Undo/Redo (Cmd+Z / Cmd+Shift+Z)
+    const { canUndo, canRedo, undoLabel, redoLabel } = useUndoShortcut()
 
     // Viewport state (camera position persistence)
     const [initialViewport, setInitialViewport] = useState<ViewportData | null>(null)

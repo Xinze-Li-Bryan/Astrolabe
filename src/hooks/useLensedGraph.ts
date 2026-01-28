@@ -10,11 +10,16 @@
  *   // Pass transformed nodes/edges to ForceGraph3D
  */
 
-import { useMemo } from 'react'
+import { useMemo, useCallback } from 'react'
 import type { AstrolabeNode as Node, AstrolabeEdge as Edge } from '@/types/graph'
 import { useLensStore } from '@/lib/lensStore'
 import { applyLens } from '@/lib/lenses/pipeline'
 import type { LensPipelineResult, NamespaceGroup, LensLayout } from '@/lib/lenses/types'
+import {
+  toggleGroupExpandedUndoable,
+  setLensFocusNodeUndoable,
+  setActiveLensUndoable,
+} from '@/lib/history/lensActions'
 
 export interface UseLensedGraphResult {
   // Transformed data
@@ -75,20 +80,37 @@ export function useLensedGraph(
 
 /**
  * Hook to get lens actions (for UI components)
+ *
+ * Returns undoable versions of user-driven actions (toggle, focus, lens switch)
+ * and non-undoable versions of system actions (cancel, auto-select, reset).
  */
 export function useLensActions() {
-  const setActiveLens = useLensStore(state => state.setActiveLens)
-  const setLensFocusNode = useLensStore(state => state.setLensFocusNode)
+  // Non-undoable actions (system-driven, not user intent)
   const cancelLensActivation = useLensStore(state => state.cancelLensActivation)
-  const toggleGroupExpanded = useLensStore(state => state.toggleGroupExpanded)
   const autoSelectLens = useLensStore(state => state.autoSelectLens)
   const resetLens = useLensStore(state => state.resetLens)
 
+  // Undoable actions (user-driven)
+  const toggleGroupExpanded = useCallback((groupId: string) => {
+    toggleGroupExpandedUndoable(groupId)
+  }, [])
+
+  const setLensFocusNode = useCallback((nodeId: string | null) => {
+    setLensFocusNodeUndoable(nodeId)
+  }, [])
+
+  const setActiveLens = useCallback((lensId: string) => {
+    setActiveLensUndoable(lensId)
+  }, [])
+
   return {
+    // Undoable (user-driven)
     setActiveLens,
     setLensFocusNode,
-    cancelLensActivation,
     toggleGroupExpanded,
+
+    // Non-undoable (system-driven)
+    cancelLensActivation,
     autoSelectLens,
     resetLens,
   }
