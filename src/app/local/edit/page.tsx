@@ -67,6 +67,12 @@ const ForceGraph3D = dynamic(() => import('@/components/graph3d/ForceGraph3D'), 
 import type { PhysicsParams } from '@/components/graph3d/ForceGraph3D'
 import { DEFAULT_PHYSICS } from '@/components/graph3d/ForceLayout'
 
+// Import lens components
+import { LensPicker } from '@/components/LensPicker'
+import { LensIndicator } from '@/components/LensIndicator'
+import { useLensPickerShortcut } from '@/hooks/useLensPickerShortcut'
+import { useLensStore } from '@/lib/lensStore'
+
 
 const getStatusLabel = (status: string) => {
     switch (status) {
@@ -126,6 +132,9 @@ function LocalEditorContent() {
     const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
     const [physics, setPhysics] = useState<PhysicsParams>({ ...DEFAULT_PHYSICS })
     const [expandedInfoTips, setExpandedInfoTips] = useState<Set<string>>(new Set())
+
+    // Lens picker (Cmd+K)
+    const { isOpen: isLensPickerOpen, open: openLensPicker, close: closeLensPicker } = useLensPickerShortcut()
 
     // Viewport state (camera position persistence)
     const [initialViewport, setInitialViewport] = useState<ViewportData | null>(null)
@@ -243,6 +252,23 @@ function LocalEditorContent() {
     const namespaceDepthPreview = useMemo(() => {
         return getNamespaceDepthPreview(astrolabeNodes, 5)
     }, [astrolabeNodes])
+
+    // Auto-select lens for large graphs on first load
+    const autoSelectLens = useLensStore(state => state.autoSelectLens)
+    const activeLensId = useLensStore(state => state.activeLensId)
+    const hasAutoSelectedRef = useRef(false)
+    useEffect(() => {
+        // Only auto-select once per project load, and only for large graphs
+        if (!hasAutoSelectedRef.current && rawNodeCount > 300) {
+            hasAutoSelectedRef.current = true
+            autoSelectLens(rawNodeCount)
+        }
+    }, [rawNodeCount, autoSelectLens])
+
+    // Reset auto-select flag when project changes
+    useEffect(() => {
+        hasAutoSelectedRef.current = false
+    }, [projectPath])
 
     // Status colors - from unified proof status config (memoized for performance)
     const statusColors: Record<string, string> = useMemo(() =>
@@ -756,9 +782,12 @@ function LocalEditorContent() {
     }
 
     const canvasNodes: Node[] = useMemo(() => {
-        // Only show nodes in visibleNodes, using backend-returned default styles
+        // When any lens is active, show all nodes (lens system handles visibility via aggregation)
+        // Canvas visibility (visibleNodes) is only used when no lens is active
+        // This ensures namespace bubbles can be created from all nodes, not just canvas-visible ones
+        const hasActiveLens = activeLensId && activeLensId !== 'none'
         return astrolabeNodes
-            .filter(node => visibleNodes.includes(node.id))
+            .filter(node => hasActiveLens || visibleNodes.includes(node.id))
             .map(node => ({
                 id: node.id,
                 name: node.name,
@@ -784,7 +813,7 @@ function LocalEditorContent() {
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes])
+    }, [astrolabeNodes, visibleNodes, activeLensId])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -1238,6 +1267,8 @@ function LocalEditorContent() {
                         <HomeIcon className="w-4 h-4 text-white/60 hover:text-white" />
                     </button>
                     <span className="text-sm font-mono text-white/60 ml-2">{projectName}</span>
+                    <div className="w-px h-4 bg-white/20 ml-2" />
+                    <LensIndicator onOpenLensPicker={openLensPicker} />
                 </div>
                 <div className="flex items-center gap-2">
                     {/* View mode switch - temporarily hidden, 2D in development */}
@@ -2834,6 +2865,13 @@ function LocalEditorContent() {
                     </div>
                 </div>
             )}
+
+            {/* Lens Picker (Cmd+K) */}
+            <LensPicker
+                isOpen={isLensPickerOpen}
+                onClose={closeLensPicker}
+                nodeCount={canvasNodes.length}
+            />
         </div>
     )
 }

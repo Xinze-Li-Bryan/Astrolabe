@@ -24,12 +24,15 @@ interface UseFileWatchResult {
   lastChangedFiles: string[];
 }
 
+const META_REFRESH_DEBOUNCE_MS = 250; // Debounce meta refresh to avoid reload storms
+
 export function useFileWatch(
   projectPath: string | null,
   options: UseFileWatchOptions | (() => void) // Support legacy single callback or new object
 ): UseFileWatchResult {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const metaRefreshTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const isConnectingRef = useRef(false);
   const [status, setStatus] = useState<WatchStatus>("disconnected");
@@ -92,10 +95,18 @@ export function useFileWatch(
             setLastChangedFiles(data.files);
             onRefreshRef.current?.();
           } else if (data.type === "meta_refresh") {
-            // meta.json changes
-            console.log("[FileWatch] Meta changed:", data.files);
+            // meta.json changes - debounce to avoid reload storms
             setLastChangedFiles(data.files);
-            onMetaRefreshRef.current?.();
+
+            // Clear any pending meta refresh
+            if (metaRefreshTimerRef.current) {
+              clearTimeout(metaRefreshTimerRef.current);
+            }
+            // Debounce the meta refresh callback
+            metaRefreshTimerRef.current = setTimeout(() => {
+              console.log("[FileWatch] Meta changed (debounced):", data.files);
+              onMetaRefreshRef.current?.();
+            }, META_REFRESH_DEBOUNCE_MS);
           } else if (data.type === "error") {
             console.error("[FileWatch] Server error:", data.message);
             setStatus("error");
@@ -139,6 +150,10 @@ export function useFileWatch(
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
+      }
+      if (metaRefreshTimerRef.current) {
+        clearTimeout(metaRefreshTimerRef.current);
+        metaRefreshTimerRef.current = null;
       }
       if (wsRef.current) {
         wsRef.current.close();

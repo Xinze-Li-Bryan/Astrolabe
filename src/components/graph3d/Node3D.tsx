@@ -58,16 +58,21 @@ interface Node3DProps {
   isClickable?: boolean  // Add edge mode, clickable hint for non-selected nodes
   isRemovable?: boolean  // Remove mode, removable hint for nodes (red pulse)
   hasHiddenNeighbors?: boolean  // Node has hidden dependencies/dependents that can be expanded
+  isBubble?: boolean  // True for namespace bubble nodes that support context menu
   onSelect: () => void
   onHover: (hovered: boolean) => void
   onDragStart: () => void
   onDragEnd: () => void
+  onContextMenu?: (e: ThreeEvent<MouseEvent>) => void  // Right-click handler for context menu
   isDragging: boolean
   showLabel?: boolean
 }
 
 // Red color in remove mode
 const REMOVE_COLOR = '#ff4444'
+
+// Purple color for namespace bubbles
+const BUBBLE_COLOR = '#a855f7'
 
 // Node types that require status ring (consistent with backend PROOF_REQUIRING_KINDS)
 const PROOF_REQUIRING_KINDS = ['theorem', 'lemma', 'proposition', 'corollary']
@@ -81,10 +86,12 @@ export const Node3D = memo(function Node3D({
   isClickable = false,
   isRemovable = false,
   hasHiddenNeighbors = false,
+  isBubble = false,
   onSelect,
   onHover,
   onDragStart,
   onDragEnd,
+  onContextMenu,
   isDragging,
   showLabel = true,
 }: Node3DProps) {
@@ -92,11 +99,18 @@ export const Node3D = memo(function Node3D({
   const clickableGlowRef = useRef<THREE.Group>(null)
   const removableGlowRef = useRef<THREE.Group>(null)
   const expandableGlowRef = useRef<THREE.Group>(null)
+  const bubbleGlowRef = useRef<THREE.Group>(null)
   const { gl } = useThree()
 
-  // Get initial position
-  const initialPos = positionsRef.current.get(node.id) || [0, 0, 0]
+  // Get initial position - use a ref to track if we've set it, and update on re-render
+  const initialPosFromRef = positionsRef.current.get(node.id)
+  const initialPos: [number, number, number] = initialPosFromRef || [0, 0, 0]
   const targetPos = useRef(new THREE.Vector3(...initialPos))
+
+  // Update targetPos if initialPos changed (e.g., after bubble positions are seeded)
+  if (initialPosFromRef) {
+    targetPos.current.set(...initialPosFromRef)
+  }
 
   // Color: use getNodeColor which handles fallback to KIND_COLORS
   const color = getNodeColor(node)
@@ -144,7 +158,7 @@ export const Node3D = memo(function Node3D({
     groupRef.current.scale.setScalar(newScale)
 
     // Only accumulate time when animation is needed
-    const needsAnimation = (isClickable && clickableGlowRef.current) || (isRemovable && removableGlowRef.current) || (hasHiddenNeighbors && expandableGlowRef.current)
+    const needsAnimation = (isClickable && clickableGlowRef.current) || (isRemovable && removableGlowRef.current) || (hasHiddenNeighbors && expandableGlowRef.current) || (isBubble && bubbleGlowRef.current)
     if (needsAnimation) {
       animTimeRef.current += delta
     }
@@ -183,6 +197,18 @@ export const Node3D = memo(function Node3D({
         material.opacity = baseOpacity * pulse
       }
     }
+
+    // Bubble node glow animation - prominent purple glow for namespace bubbles
+    if (isBubble && bubbleGlowRef.current) {
+      const pulse = 0.6 + Math.sin(animTimeRef.current * 1.0) * 0.4  // 0.2 to 1.0 slow breathing
+      const children = bubbleGlowRef.current.children
+      for (let i = 0; i < children.length; i++) {
+        const material = (children[i] as THREE.Mesh).material as THREE.MeshBasicMaterial
+        // Prominent glow to indicate it's a clickable bubble
+        const baseOpacity = i === 0 ? 0.5 : i === 1 ? 0.3 : 0.15
+        material.opacity = baseOpacity * pulse
+      }
+    }
   })
 
   // Dragging state
@@ -191,10 +217,30 @@ export const Node3D = memo(function Node3D({
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation()
-    dragStartTime.current = Date.now()
-    wasDragging.current = false
-    onDragStart()
-    gl.domElement.style.cursor = 'grabbing'
+
+    const ne = e.nativeEvent as PointerEvent
+
+    // Handle right-click (button 2 or buttons bitmask 2) or ctrl+click or cmd+click (macOS)
+    // Use buttons bitmask for robust trackpad/browser detection
+    const isRightClick = ne.button === 2 || ne.buttons === 2
+    const isCtrlClick = ne.button === 0 && ne.ctrlKey
+    const isCmdClick = ne.button === 0 && ne.metaKey
+
+    if ((isRightClick || isCtrlClick || isCmdClick) && isBubble && onContextMenu) {
+      ne.preventDefault()
+      // Stop native event propagation to prevent OrbitControls from stealing the event
+      ;(ne as unknown as { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.()
+      onContextMenu(e as unknown as ThreeEvent<MouseEvent>)
+      return  // Don't start drag on right-click
+    }
+
+    // Only start drag for left-click
+    if (ne.button === 0 && !ne.ctrlKey && !ne.metaKey) {
+      dragStartTime.current = Date.now()
+      wasDragging.current = false
+      onDragStart()
+      gl.domElement.style.cursor = 'grabbing'
+    }
   }
 
   const handlePointerUp = (e: ThreeEvent<PointerEvent>) => {
@@ -214,6 +260,17 @@ export const Node3D = memo(function Node3D({
     wasDragging.current = false
   }
 
+  // Handle right-click for context menu (bubble nodes)
+  const handleContextMenu = (e: ThreeEvent<MouseEvent>) => {
+    // Always prevent the default browser context menu on right-click
+    e.nativeEvent.preventDefault()
+    e.stopPropagation()
+
+    if (isBubble && onContextMenu) {
+      onContextMenu(e)
+    }
+  }
+
   return (
     <group
       ref={groupRef}
@@ -221,10 +278,11 @@ export const Node3D = memo(function Node3D({
       onClick={handleClick}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
+      onContextMenu={handleContextMenu}
       onPointerOver={(e) => {
         e.stopPropagation()
         onHover(true)
-        gl.domElement.style.cursor = 'grab'
+        gl.domElement.style.cursor = isBubble ? 'pointer' : 'grab'
       }}
       onPointerOut={(e) => {
         e.stopPropagation()
@@ -242,7 +300,7 @@ export const Node3D = memo(function Node3D({
         <group ref={clickableGlowRef}>
           {/* Inner glow - brightest */}
           <mesh>
-            <sphereGeometry args={[size * 1.8, 32, 32]} />
+            <sphereGeometry args={[size * 1.8, 8, 6]} />
             <meshBasicMaterial
               color={color}
               transparent
@@ -253,7 +311,7 @@ export const Node3D = memo(function Node3D({
           </mesh>
           {/* Middle glow */}
           <mesh>
-            <sphereGeometry args={[size * 2.8, 32, 32]} />
+            <sphereGeometry args={[size * 2.8, 8, 6]} />
             <meshBasicMaterial
               color={color}
               transparent
@@ -264,7 +322,7 @@ export const Node3D = memo(function Node3D({
           </mesh>
           {/* Outer glow - faintest */}
           <mesh>
-            <sphereGeometry args={[size * 4, 32, 32]} />
+            <sphereGeometry args={[size * 4, 6, 4]} />
             <meshBasicMaterial
               color={color}
               transparent
@@ -281,7 +339,7 @@ export const Node3D = memo(function Node3D({
         <group ref={removableGlowRef}>
           {/* Inner glow - brightest */}
           <mesh>
-            <sphereGeometry args={[size * 1.8, 32, 32]} />
+            <sphereGeometry args={[size * 1.8, 8, 6]} />
             <meshBasicMaterial
               color={REMOVE_COLOR}
               transparent
@@ -292,7 +350,7 @@ export const Node3D = memo(function Node3D({
           </mesh>
           {/* Middle glow */}
           <mesh>
-            <sphereGeometry args={[size * 2.8, 32, 32]} />
+            <sphereGeometry args={[size * 2.8, 8, 6]} />
             <meshBasicMaterial
               color={REMOVE_COLOR}
               transparent
@@ -303,7 +361,7 @@ export const Node3D = memo(function Node3D({
           </mesh>
           {/* Outer glow - faintest */}
           <mesh>
-            <sphereGeometry args={[size * 4, 32, 32]} />
+            <sphereGeometry args={[size * 4, 6, 4]} />
             <meshBasicMaterial
               color={REMOVE_COLOR}
               transparent
@@ -316,11 +374,11 @@ export const Node3D = memo(function Node3D({
       )}
 
       {/* Expandable state glow - node has hidden neighbors that can be revealed */}
-      {hasHiddenNeighbors && !isSelected && !isClickable && !isRemovable && !isDimmed && (
+      {hasHiddenNeighbors && !isSelected && !isClickable && !isRemovable && !isDimmed && !isBubble && (
         <group ref={expandableGlowRef}>
           {/* Inner glow - uses node color for consistent visual */}
           <mesh>
-            <sphereGeometry args={[size * 1.6, 32, 32]} />
+            <sphereGeometry args={[size * 1.6, 8, 6]} />
             <meshBasicMaterial
               color={color}
               transparent
@@ -331,7 +389,7 @@ export const Node3D = memo(function Node3D({
           </mesh>
           {/* Outer glow */}
           <mesh>
-            <sphereGeometry args={[size * 2.2, 32, 32]} />
+            <sphereGeometry args={[size * 2.2, 8, 6]} />
             <meshBasicMaterial
               color={color}
               transparent
@@ -343,9 +401,48 @@ export const Node3D = memo(function Node3D({
         </group>
       )}
 
+      {/* Bubble node glow - prominent purple glow for namespace bubbles (right-click to expand/collapse) */}
+      {isBubble && !isSelected && !isDimmed && (
+        <group ref={bubbleGlowRef}>
+          {/* Inner glow - brightest */}
+          <mesh>
+            <sphereGeometry args={[size * 2.0, 12, 8]} />
+            <meshBasicMaterial
+              color={BUBBLE_COLOR}
+              transparent
+              opacity={0.5}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+          {/* Middle glow */}
+          <mesh>
+            <sphereGeometry args={[size * 3.0, 10, 6]} />
+            <meshBasicMaterial
+              color={BUBBLE_COLOR}
+              transparent
+              opacity={0.3}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+          {/* Outer glow - faintest, creates a halo effect */}
+          <mesh>
+            <sphereGeometry args={[size * 4.5, 8, 6]} />
+            <meshBasicMaterial
+              color={BUBBLE_COLOR}
+              transparent
+              opacity={0.15}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+        </group>
+      )}
+
       {/* Invisible collision sphere - solves clicking difficulty for hollow shapes like torus */}
       <mesh visible={false}>
-        <sphereGeometry args={[size * 1.2, 16, 16]} />
+        <sphereGeometry args={[size * 1.2, 6, 4]} />
         <meshBasicMaterial />
       </mesh>
 

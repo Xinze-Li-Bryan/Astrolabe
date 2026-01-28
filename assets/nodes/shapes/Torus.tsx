@@ -3,7 +3,7 @@ import type { NodeShape3DProps, NodeShape2DConfig } from '../../types'
 
 export function Torus3D({ size, color, isSelected }: NodeShape3DProps) {
   return (
-    <DreiTorus args={[size, size * 0.4, 16, 32]}>
+    <DreiTorus args={[size, size * 0.4, 12, 24]}>
       <meshStandardMaterial
         color={color}
         emissive={isSelected ? color : '#000000'}

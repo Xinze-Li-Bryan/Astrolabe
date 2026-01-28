@@ -3,7 +3,7 @@ import type { NodeShape3DProps, NodeShape2DConfig } from '../../types'
 
 export function Cone3D({ size, color, isSelected }: NodeShape3DProps) {
   return (
-    <DreiCone args={[size, size * 1.5, 32]}>
+    <DreiCone args={[size, size * 1.5, 16]}>
       <meshStandardMaterial
         color={color}
         emissive={isSelected ? color : '#000000'}

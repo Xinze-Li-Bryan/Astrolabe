@@ -15,12 +15,22 @@ import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Node, Edge } from '@/lib/store'
 import {
+  isDevMode,
+  recordFrameStart,
+  recordPhysicsTime,
+  recordFrameEnd,
+  updateNodeEdgeCount,
+  updateStableFrames,
+  updateRendererInfo,
+} from '@/lib/devMode'
+import {
   groupNodesByNamespace,
   computeClusterCentroids,
   calculateClusterForce,
   calculateInterClusterRepulsion,
   calculateNodeDegrees,
   calculateAdaptiveSpringLength,
+  calculateBarnesHutRepulsion,
   type NamespaceGroups,
   type NodeDegree,
   type AdaptiveSpringMode,
@@ -47,20 +57,20 @@ export interface PhysicsParams {
 
 // Default physics parameters
 export const DEFAULT_PHYSICS: PhysicsParams = {
-  repulsionStrength: 150,    // Increased from 100 for better initial spacing
-  springLength: 6,           // Increased from 4 for less cluttered layout
-  springStrength: 1.5,       // Slightly reduced for more relaxed springs
-  centerStrength: 0.3,       // Reduced to allow more spread
-  damping: 0.7,
-  // Namespace clustering defaults
-  clusteringEnabled: true,
-  clusteringStrength: 0.2,   // Reduced from 0.3 for less tight clusters
-  clusterSeparation: 0.5,    // Push different clusters apart
+  repulsionStrength: 200,    // Strong repulsion to prevent collapse
+  springLength: 8,           // Longer springs for more spread
+  springStrength: 1.0,       // Moderate springs
+  centerStrength: 0.05,      // VERY weak center gravity - was 0.3, major collapse culprit
+  damping: 0.8,              // Slightly higher damping for stability
+  // Namespace clustering defaults - DISABLED until base layout is robust
+  clusteringEnabled: false,  // Was true - clustering can cause collapse
+  clusteringStrength: 0.1,   // Reduced from 0.2
+  clusterSeparation: 0.3,    // Reduced from 0.5
   clusteringDepth: 1,
   // Density-adaptive defaults
   adaptiveSpringEnabled: true,
   adaptiveSpringMode: 'sqrt',
-  adaptiveSpringScale: 0.5,  // Increased from 0.3 for longer edges on hubs
+  adaptiveSpringScale: 0.5,
 }
 
 interface ForceLayoutProps {
@@ -101,37 +111,30 @@ function simulateStep(
   const forces = new Map<string, [number, number, number]>()
   nodes.forEach((n) => forces.set(n.id, [0, 0, 0]))
 
-  // Repulsion (Coulomb's law)
-  const repulsionCutoff = 30
-  const repulsionCutoffSq = repulsionCutoff * repulsionCutoff
-  const baseForce = physics.repulsionStrength
+  // Repulsion using Barnes-Hut O(n log n) approximation
+  // Convert to arrays for Barnes-Hut calculation
+  const posArray: [number, number, number][] = []
+  const forceArray: [number, number, number][] = []
+  const nodeOrder: string[] = []
 
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const p1 = positions.get(nodes[i].id)
-      const p2 = positions.get(nodes[j].id)
-      if (!p1 || !p2) continue
+  for (const node of nodes) {
+    const pos = positions.get(node.id)
+    if (pos) {
+      posArray.push([...pos] as [number, number, number])
+      forceArray.push([0, 0, 0])
+      nodeOrder.push(node.id)
+    }
+  }
 
-      const dx = p2[0] - p1[0]
-      const dy = p2[1] - p1[1]
-      const dz = p2[2] - p1[2]
-      const distSq = dx * dx + dy * dy + dz * dz
+  calculateBarnesHutRepulsion(posArray, forceArray, physics.repulsionStrength, 0.7)
 
-      if (distSq > repulsionCutoffSq) continue
-
-      const dist = Math.sqrt(distSq) || 0.1
-      const minDist = 2
-      const effectiveDist = Math.max(dist, minDist)
-      const force = baseForce / (effectiveDist * effectiveDist)
-
-      const f1 = forces.get(nodes[i].id)!
-      const f2 = forces.get(nodes[j].id)!
-      const fx = (dx / dist) * force
-      const fy = (dy / dist) * force
-      const fz = (dz / dist) * force
-
-      f1[0] -= fx; f1[1] -= fy; f1[2] -= fz
-      f2[0] += fx; f2[1] += fy; f2[2] += fz
+  // Copy forces back to the forces map
+  for (let i = 0; i < nodeOrder.length; i++) {
+    const f = forces.get(nodeOrder[i])
+    if (f) {
+      f[0] += forceArray[i][0]
+      f[1] += forceArray[i][1]
+      f[2] += forceArray[i][2]
     }
   }
 
@@ -446,9 +449,13 @@ export function ForceLayout({
     // If most nodes have saved positions (>50%), only center and scale, skip physics simulation
     const savedRatio = savedPositionCount / currentCount
 
+    // Scale target radius based on node count - larger graphs need more spread
+    const edgeCount = edges.length
     const baseRadius = 12
     const dynamicRadius = Math.sqrt(currentCount) * physics.springLength * 0.5
-    const targetRadius = Math.min(24, Math.max(baseRadius, dynamicRadius))
+    // For large graphs (15k+ edges), allow much larger radius
+    const maxRadius = edgeCount > 5000 ? 80 : edgeCount > 1000 ? 50 : 24
+    const targetRadius = Math.min(maxRadius, Math.max(baseRadius, dynamicRadius))
 
     // Calculate center of mass and max radius to detect dense graphs
     let cx = 0, cy = 0, cz = 0
@@ -474,14 +481,56 @@ export function ForceLayout({
     const looksDense = positions.size >= denseNodeCountThreshold && maxRadiusBefore < denseRadiusThreshold
     const allowScaleUp = positions.size >= denseNodeCountThreshold
 
-    const baseIterations = Math.min(1600, 300 + currentCount * 10)
-    const warmupIterations = looksDense ? baseIterations : Math.min(800, baseIterations)
-    const stabilityThreshold = looksDense ? 0.002 : 0.01
+    // Scale iterations based on graph size - but cap to avoid blocking main thread
+    // For very large graphs, rely more on pre-spread + physics at runtime
+    const baseIterations = Math.min(800, 200 + currentCount * 2)
+    const warmupIterations = looksDense ? baseIterations : Math.min(500, baseIterations)
+    const stabilityThreshold = looksDense ? 0.01 : 0.05
+    console.log(`[ForceLayout] Graph size: ${currentCount} nodes, ${edgeCount} edges, warmup=${warmupIterations} iterations, targetRadius=${targetRadius}`)
+
+    // For very large graphs, skip synchronous warmup entirely to avoid freezing
+    const skipWarmup = edgeCount > 1000 || currentCount > 500
 
     if (savedRatio > 0.5 && !looksDense) {
       console.log(`[ForceLayout] ${Math.round(savedRatio * 100)}% nodes have saved positions, skipping physics warmup`)
       centerAndScale(positions, targetRadius, allowScaleUp)
+    } else if (skipWarmup) {
+      // Large graph: just pre-spread and let runtime physics handle it
+      const spreadRadius = targetRadius * 1.2
+      console.log(`[ForceLayout] Large graph (${currentCount} nodes, ${edgeCount} edges) - pre-spreading only, skipping warmup...`)
+      let i = 0
+      for (const [id] of positions.entries()) {
+        // Fibonacci sphere distribution for even spread
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+        const theta = i * goldenAngle
+        const phi = Math.acos(1 - 2 * (i + 0.5) / currentCount)
+        const r = spreadRadius * (0.3 + 0.7 * Math.cbrt((i + 1) / currentCount))
+        positions.set(id, [
+          r * Math.sin(phi) * Math.cos(theta),
+          r * Math.sin(phi) * Math.sin(theta),
+          r * Math.cos(phi),
+        ])
+        i++
+      }
     } else {
+      // Small graph: can do synchronous warmup
+      if (savedRatio < 0.2 && currentCount > 100) {
+        const spreadRadius = targetRadius * 1.5
+        console.log(`[ForceLayout] Pre-spreading ${currentCount} nodes to radius ${spreadRadius}...`)
+        let i = 0
+        for (const [id] of positions.entries()) {
+          const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+          const theta = i * goldenAngle
+          const phi = Math.acos(1 - 2 * (i + 0.5) / currentCount)
+          const r = spreadRadius * (0.5 + 0.5 * Math.cbrt((i + 1) / currentCount))
+          positions.set(id, [
+            r * Math.sin(phi) * Math.cos(theta),
+            r * Math.sin(phi) * Math.sin(theta),
+            r * Math.cos(phi),
+          ])
+          i++
+        }
+      }
       console.log(`[ForceLayout] Warming up with ${positions.size} nodes (${Math.round(savedRatio * 100)}% have saved positions)...`)
       warmupSimulation(nodes, edges, positions, physics, warmupIterations, stabilityThreshold, targetRadius, allowScaleUp)
     }
@@ -533,15 +582,30 @@ export function ForceLayout({
   }, [draggingNodeId, setDraggingNodeId, gl.domElement])
 
   useFrame((_, delta) => {
+    const devMode = isDevMode()
+    const frameStart = devMode ? recordFrameStart() : 0
+
     if (pendingWarmup.current && positionsRef.current.size > 0) {
       runWarmupIfNeeded('pending')
     }
 
     const positions = positionsRef.current
-    if (!positions || positions.size === 0 || !running) return
+    if (!positions || positions.size === 0 || !running) {
+      if (devMode) {
+        // Still update node/edge count even when not simulating
+        updateNodeEdgeCount(nodes.length, edges.length)
+        recordFrameEnd(frameStart)
+      }
+      return
+    }
 
     // Skip frames after stable to reduce CPU usage
-    if (!draggingNodeId && stableFrames.current > 60) {
+    if (!draggingNodeId && stableFrames.current > 90) {
+      if (devMode) {
+        updateNodeEdgeCount(nodes.length, edges.length)
+        updateStableFrames(stableFrames.current)
+        recordFrameEnd(frameStart)
+      }
       return
     }
 
@@ -582,6 +646,7 @@ export function ForceLayout({
     }
 
     // Physics simulation
+    const physicsStart = devMode ? performance.now() : 0
     const dt = Math.min(delta, 0.05)
     const newPositions = new Map(positions)
 
@@ -594,41 +659,29 @@ export function ForceLayout({
     const forces = new Map<string, [number, number, number]>()
     nodes.forEach((n) => forces.set(n.id, [0, 0, 0]))
 
-    // Repulsion (Coulomb's law)
-    const repulsionCutoff = 30
-    const repulsionCutoffSq = repulsionCutoff * repulsionCutoff
-    const baseForce = physics.repulsionStrength
+    // Repulsion using Barnes-Hut O(n log n) approximation
+    const posArray: [number, number, number][] = []
+    const forceArray: [number, number, number][] = []
+    const nodeOrder: string[] = []
 
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const p1 = positions.get(nodes[i].id)
-        const p2 = positions.get(nodes[j].id)
-        if (!p1 || !p2) continue
+    for (const node of nodes) {
+      const pos = positions.get(node.id)
+      if (pos) {
+        posArray.push([...pos] as [number, number, number])
+        forceArray.push([0, 0, 0])
+        nodeOrder.push(node.id)
+      }
+    }
 
-        const dx = p2[0] - p1[0]
-        const dy = p2[1] - p1[1]
-        const dz = p2[2] - p1[2]
-        const distSq = dx * dx + dy * dy + dz * dz
+    calculateBarnesHutRepulsion(posArray, forceArray, physics.repulsionStrength, 0.7)
 
-        if (distSq > repulsionCutoffSq) continue
-
-        const dist = Math.sqrt(distSq) || 0.1
-        const minDist = 2
-        const effectiveDist = Math.max(dist, minDist)
-        const force = baseForce / (effectiveDist * effectiveDist)
-
-        const f1 = forces.get(nodes[i].id)!
-        const f2 = forces.get(nodes[j].id)!
-        const fx = (dx / dist) * force
-        const fy = (dy / dist) * force
-        const fz = (dz / dist) * force
-
-        f1[0] -= fx
-        f1[1] -= fy
-        f1[2] -= fz
-        f2[0] += fx
-        f2[1] += fy
-        f2[2] += fz
+    // Copy forces back to the forces map
+    for (let i = 0; i < nodeOrder.length; i++) {
+      const f = forces.get(nodeOrder[i])
+      if (f) {
+        f[0] += forceArray[i][0]
+        f[1] += forceArray[i][1]
+        f[2] += forceArray[i][2]
       }
     }
 
@@ -637,6 +690,11 @@ export function ForceLayout({
     const springStrength = physics.springStrength
 
     edges.forEach((edge) => {
+      // Skip spring forces for bubble nodes - they should only have repulsion
+      // This prevents bubbles from being pulled together by edges
+      const isBubbleEdge = edge.source.startsWith('group:') || edge.target.startsWith('group:')
+      if (isBubbleEdge) return
+
       const p1 = positions.get(edge.source)
       const p2 = positions.get(edge.target)
       if (!p1 || !p2) return
@@ -690,6 +748,58 @@ export function ForceLayout({
       f[1] -= pos[1] * centerStrength
       f[2] -= pos[2] * centerStrength
     })
+
+    // Bubble-to-bubble repulsion (bubbles are synthetic nodes not in the main nodes array)
+    // This ensures namespace bubbles spread out rather than clustering together
+    const bubbleIds = Array.from(positions.keys()).filter(id => id.startsWith('group:'))
+
+    // Apply center gravity to bubbles too (so they don't fly off)
+    bubbleIds.forEach((bubbleId) => {
+      const pos = positions.get(bubbleId)
+      if (!pos) return
+      if (!forces.has(bubbleId)) forces.set(bubbleId, [0, 0, 0])
+      const f = forces.get(bubbleId)!
+      f[0] -= pos[0] * centerStrength * 0.5 // Weaker center pull for bubbles
+      f[1] -= pos[1] * centerStrength * 0.5
+      f[2] -= pos[2] * centerStrength * 0.5
+    })
+
+    if (bubbleIds.length > 1) {
+      const bubbleRepulsionStrength = physics.repulsionStrength * 2 // Stronger repulsion for bubbles
+      for (let i = 0; i < bubbleIds.length; i++) {
+        for (let j = i + 1; j < bubbleIds.length; j++) {
+          const pos1 = positions.get(bubbleIds[i])
+          const pos2 = positions.get(bubbleIds[j])
+          if (!pos1 || !pos2) continue
+
+          const dx = pos2[0] - pos1[0]
+          const dy = pos2[1] - pos1[1]
+          const dz = pos2[2] - pos1[2]
+          const distSq = dx * dx + dy * dy + dz * dz
+          const dist = Math.sqrt(distSq) || 0.1
+          const minDist = 15 // Bubbles should stay at least this far apart
+
+          if (dist < minDist * 3) {
+            // Apply repulsion force
+            const effectiveDist = Math.max(dist, 1)
+            const force = bubbleRepulsionStrength / (effectiveDist * effectiveDist)
+
+            const fx = (dx / dist) * force
+            const fy = (dy / dist) * force
+            const fz = (dz / dist) * force
+
+            // Ensure forces exist for bubbles
+            if (!forces.has(bubbleIds[i])) forces.set(bubbleIds[i], [0, 0, 0])
+            if (!forces.has(bubbleIds[j])) forces.set(bubbleIds[j], [0, 0, 0])
+
+            const f1 = forces.get(bubbleIds[i])!
+            const f2 = forces.get(bubbleIds[j])!
+            f1[0] -= fx; f1[1] -= fy; f1[2] -= fz
+            f2[0] += fx; f2[1] += fy; f2[2] += fz
+          }
+        }
+      }
+    }
 
     // Namespace clustering force
     if (physics.clusteringEnabled && namespaceGroups) {
@@ -779,8 +889,44 @@ export function ForceLayout({
       totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])
     })
 
+    // Apply forces to bubble nodes (not in main nodes array)
+    bubbleIds.forEach((bubbleId) => {
+      const pos = positions.get(bubbleId)
+      const force = forces.get(bubbleId)
+      if (!pos || !force) return
+
+      const vel = velocities.current.get(bubbleId) || [0, 0, 0]
+
+      // Update velocity
+      vel[0] = (vel[0] + force[0] * dt) * damping
+      vel[1] = (vel[1] + force[1] * dt) * damping
+      vel[2] = (vel[2] + force[2] * dt) * damping
+
+      // Limit velocity
+      const speed = Math.sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2])
+      if (speed > maxVelocity) {
+        vel[0] *= maxVelocity / speed
+        vel[1] *= maxVelocity / speed
+        vel[2] *= maxVelocity / speed
+      }
+
+      velocities.current.set(bubbleId, vel)
+
+      // Update position
+      const newPos: [number, number, number] = [
+        pos[0] + vel[0] * dt,
+        pos[1] + vel[1] * dt,
+        pos[2] + vel[2] * dt,
+      ]
+      newPositions.set(bubbleId, newPos)
+
+      totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])
+    })
+
     // Update ref directly (don't trigger React re-renders)
-    if (totalMovement > 0.01 || draggingNodeId) {
+    // Use higher threshold to avoid freezing layouts that are still expanding
+    const movementThreshold = 0.05
+    if (totalMovement > movementThreshold || draggingNodeId) {
       // Modify Map contents directly instead of replacing entire Map (avoid flashing)
       newPositions.forEach((pos, id) => {
         positionsRef.current.set(id, pos)
@@ -788,12 +934,51 @@ export function ForceLayout({
       stableFrames.current = 0
       hasTriggeredStable.current = false  // Reset stable trigger flag
     } else {
-      stableFrames.current++
-      // Trigger onStable callback when first reaching stable threshold (60 frames)
-      if (stableFrames.current === 60 && !hasTriggeredStable.current && onStable) {
-        hasTriggeredStable.current = true
-        onStable()
+      // Before declaring stable, check that the layout has reasonable spread
+      // Calculate max radius from center to detect collapsed layouts
+      let maxRadius = 0
+      let cx = 0, cy = 0, cz = 0
+      for (const pos of newPositions.values()) {
+        cx += pos[0]; cy += pos[1]; cz += pos[2]
       }
+      const n = newPositions.size || 1
+      cx /= n; cy /= n; cz /= n
+      for (const pos of newPositions.values()) {
+        const r = Math.sqrt((pos[0]-cx)**2 + (pos[1]-cy)**2 + (pos[2]-cz)**2)
+        maxRadius = Math.max(maxRadius, r)
+      }
+
+      // Minimum spread: at least 3 units per sqrt(nodes), minimum 5
+      const minSpread = Math.max(5, Math.sqrt(nodes.length) * 3)
+      const hasGoodSpread = maxRadius >= minSpread
+
+      if (hasGoodSpread) {
+        stableFrames.current++
+        // Trigger onStable callback when reaching stable threshold (90 frames)
+        if (stableFrames.current === 90 && !hasTriggeredStable.current && onStable) {
+          hasTriggeredStable.current = true
+          onStable()
+        }
+      } else {
+        // Layout is collapsed - don't count as stable, keep simulating
+        stableFrames.current = 0
+      }
+    }
+
+    // Dev mode metrics
+    if (devMode) {
+      recordPhysicsTime(physicsStart)
+      updateNodeEdgeCount(nodes.length, edges.length)
+      updateStableFrames(stableFrames.current)
+      // Three.js renderer stats
+      const info = gl.info
+      updateRendererInfo({
+        drawCalls: info.render.calls,
+        triangles: info.render.triangles,
+        geometries: info.memory.geometries,
+        textures: info.memory.textures,
+      })
+      recordFrameEnd(frameStart)
     }
   })
 

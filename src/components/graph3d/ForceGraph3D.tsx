@@ -15,6 +15,9 @@ import type { Node, Edge } from '@/types/node'
 import type { CustomNode, CustomEdge, Position3D } from '@/lib/canvasStore'
 import { useCanvasStore } from '@/lib/canvasStore'
 import ForceLayout, { PhysicsParams, DEFAULT_PHYSICS } from './ForceLayout'
+import { RadialLayout } from './layouts/RadialLayout'
+import { HierarchicalLayout } from './layouts/HierarchicalLayout'
+import DevPanel from '@/components/DevPanel'
 import {
   calculateBatchSpawnPositions,
   detectNodeChanges,
@@ -22,7 +25,18 @@ import {
 } from '@/lib/nodeLifecycle'
 import Node3D from './Node3D'
 import Edge3D from './Edge3D'
+import BatchedEdges from './BatchedEdges'
+import { BubbleContextMenu } from './BubbleContextMenu'
 import type { ProofStatusType } from '@/lib/proofStatus'
+import { useLensedGraph, useLensActions } from '@/hooks/useLensedGraph'
+import type { AstrolabeNode, AstrolabeEdge } from '@/types/graph'
+import type { NamespaceGroup } from '@/lib/lenses/types'
+
+// Threshold for using batched edge rendering (single draw call)
+const BATCHED_EDGES_THRESHOLD = 500
+
+// Threshold for sparse edge mode (only show edges connected to selected/hovered node)
+const SPARSE_EDGES_THRESHOLD = 2000
 
 // Re-export types and default values
 export type { PhysicsParams }
@@ -366,6 +380,74 @@ function CameraAutoCenter({
   return null
 }
 
+// Recenter camera towards graph centroid when zoomed out far
+// This helps users see all clusters after focusing on a distant one
+function CameraZoomRecenter({
+  positionsRef,
+  controlsRef,
+}: {
+  positionsRef: React.MutableRefObject<Map<string, [number, number, number]>>
+  controlsRef: React.RefObject<any>
+}) {
+  const { camera } = useThree()
+  const graphCenterRef = useRef(new THREE.Vector3())
+  const isRecenteringRef = useRef(false)
+  const frameCountRef = useRef(0)
+  const lastNodeCountRef = useRef(0)
+
+  useFrame(() => {
+    if (!controlsRef.current || positionsRef.current.size === 0) return
+
+    // Only recalculate centroid every 30 frames or when node count changes
+    frameCountRef.current++
+    const nodeCountChanged = positionsRef.current.size !== lastNodeCountRef.current
+
+    if (frameCountRef.current >= 30 || nodeCountChanged) {
+      frameCountRef.current = 0
+      lastNodeCountRef.current = positionsRef.current.size
+
+      // Calculate graph centroid
+      let cx = 0, cy = 0, cz = 0
+      for (const pos of positionsRef.current.values()) {
+        cx += pos[0]
+        cy += pos[1]
+        cz += pos[2]
+      }
+      cx /= positionsRef.current.size
+      cy /= positionsRef.current.size
+      cz /= positionsRef.current.size
+      graphCenterRef.current.set(cx, cy, cz)
+    }
+
+    // Calculate camera distance from cached graph center
+    const cameraDistance = camera.position.distanceTo(graphCenterRef.current)
+    const targetDistance = controlsRef.current.target.distanceTo(graphCenterRef.current)
+
+    // When zoomed out far (camera distance > 80), gradually recenter
+    const recenterThreshold = 80
+    const fullRecenterDistance = 150
+
+    if (cameraDistance > recenterThreshold && targetDistance > 5) {
+      // Calculate how much to recenter (0 to 1)
+      const recenterStrength = Math.min(1, (cameraDistance - recenterThreshold) / (fullRecenterDistance - recenterThreshold))
+      const lerpFactor = 0.02 * recenterStrength
+
+      // Smoothly move target towards graph center
+      controlsRef.current.target.lerp(graphCenterRef.current, lerpFactor)
+      controlsRef.current.update()
+
+      if (!isRecenteringRef.current && recenterStrength > 0.5) {
+        console.log('[Camera] Recentering towards graph center...')
+        isRecenteringRef.current = true
+      }
+    } else {
+      isRecenteringRef.current = false
+    }
+  })
+
+  return null
+}
+
 // Scene content
 function GraphScene({
   nodes,
@@ -390,6 +472,10 @@ function GraphScene({
   layoutStableTick,
   layoutReady,
   onWarmupComplete,
+  activeLayout = 'force',
+  activeLensId = 'full',
+  lensFocusNodeId = null,
+  onNodeContextMenu,
 }: {
   nodes: Node[]
   edges: Edge[]
@@ -413,7 +499,32 @@ function GraphScene({
   layoutStableTick: number
   layoutReady: boolean
   onWarmupComplete?: () => void
+  activeLayout?: 'force' | 'radial' | 'hierarchical'
+  activeLensId?: string
+  lensFocusNodeId?: string | null
+  onNodeContextMenu?: (node: Node, clientX: number, clientY: number) => void
 }) {
+  // Get lens actions for bubble expansion
+  const { toggleGroupExpanded } = useLensActions()
+
+  // Handler that intercepts bubble clicks to toggle expansion instead of selecting
+  // This avoids expensive edge highlight computation for bubble nodes
+  const handleNodeSelectWithBubble = useCallback((node: Node | null) => {
+    if (!node) {
+      onNodeSelect(null)
+      return
+    }
+
+    // Bubble left-click: toggle expansion (fast path, no edge highlighting)
+    if (node.id.startsWith('group:')) {
+      toggleGroupExpanded(node.id)
+      return
+    }
+
+    // Normal node: proceed with selection
+    onNodeSelect(node)
+  }, [toggleGroupExpanded, onNodeSelect])
+
   // Node focus
   const focusPosition = focusNodeId ? positionsRef.current.get(focusNodeId) || null : null
   const prevFocusNodeId = useRef<string | null>(null)
@@ -449,18 +560,47 @@ function GraphScene({
   }, [])
   const positionsCount = positionsRef.current.size
 
-  // Calculate related edges
+  // Precompute adjacency once per edges change - O(E) once, then O(degree) per lookup
+  // This replaces the previous O(E) scan on every click/hover
+  const adjacency = useMemo(() => {
+    const inputs = new Map<string, string[]>()  // nodeId -> incoming edge ids
+    const outputs = new Map<string, string[]>() // nodeId -> outgoing edge ids
+    for (const e of edges) {
+      // Incoming edges (where this node is the target)
+      const targetList = inputs.get(e.target)
+      if (targetList) targetList.push(e.id)
+      else inputs.set(e.target, [e.id])
+
+      // Outgoing edges (where this node is the source)
+      const sourceList = outputs.get(e.source)
+      if (sourceList) sourceList.push(e.id)
+      else outputs.set(e.source, [e.id])
+    }
+    return { inputs, outputs }
+  }, [edges])
+
+  // Calculate related edges using precomputed adjacency - O(degree) instead of O(E)
+  // Cap FlowPulse effects when node has too many edges (prevents FPS drops)
+  const MAX_FLOWPULSE_EDGES = 20
   const relatedEdges = useMemo(() => {
     const activeId = hoveredNodeId || selectedNodeId
-    if (!activeId) return { inputs: new Set<string>(), outputs: new Set<string>() }
-    const inputs = new Set<string>()
-    const outputs = new Set<string>()
-    edges.forEach(e => {
-      if (e.target === activeId) inputs.add(e.id)
-      if (e.source === activeId) outputs.add(e.id)
-    })
-    return { inputs, outputs }
-  }, [hoveredNodeId, selectedNodeId, edges])
+    if (!activeId) return { inputs: new Set<string>(), outputs: new Set<string>(), disableFlowPulse: false }
+
+    // Skip edge highlighting for bubble nodes entirely (they toggle expansion, not selection)
+    if (activeId.startsWith('group:')) {
+      return { inputs: new Set<string>(), outputs: new Set<string>(), disableFlowPulse: true }
+    }
+
+    // O(degree) lookup instead of O(E) scan
+    const inputEdges = adjacency.inputs.get(activeId) ?? []
+    const outputEdges = adjacency.outputs.get(activeId) ?? []
+    const inputs = new Set(inputEdges)
+    const outputs = new Set(outputEdges)
+
+    // Disable flow pulse for high-degree nodes to prevent FPS drop
+    const disableFlowPulse = (inputs.size + outputs.size) > MAX_FLOWPULSE_EDGES
+    return { inputs, outputs, disableFlowPulse }
+  }, [hoveredNodeId, selectedNodeId, adjacency])
 
   // Detect bidirectional edges (A→B and B→A both exist)
   const bidirectionalEdges = useMemo(() => {
@@ -503,27 +643,90 @@ function GraphScene({
     return handlers
   }, [edges, onEdgeSelect])
 
+  // Memoize highlight/dim sets for batched mode - prevents O(E) work per render
+  const batchedEdgeHighlightSets = useMemo(() => {
+    if (!highlightedEdge) return { highlighted: undefined, dimmed: undefined }
+    const highlightedKey = `${highlightedEdge.source}->${highlightedEdge.target}`
+    return {
+      highlighted: new Set([highlightedKey]),
+      dimmed: new Set(
+        edges
+          .filter(e => !(e.source === highlightedEdge.source && e.target === highlightedEdge.target))
+          .map(e => `${e.source}->${e.target}`)
+      ),
+    }
+  }, [highlightedEdge, edges])
+
   return (
     <>
       <ambientLight intensity={0.8} />
       <directionalLight position={[10, 15, 10]} intensity={3.0} />
       <pointLight position={[-10, -10, -10]} intensity={0.5} />
 
-      <ForceLayout
-        nodes={nodes}
-        edges={edges}
-        positionsRef={positionsRef}
-        draggingNodeId={draggingNodeId}
-        setDraggingNodeId={setDraggingNodeId}
-        running={true}
-        physics={physics}
-        savedPositionCount={savedPositionCount}
-        onStable={onStable}
-        onWarmupComplete={onWarmupComplete}
-        controlsRef={controlsRef}
-      />
+      {/* Layout engine - switches based on active lens */}
+      {activeLayout === 'radial' ? (
+        <RadialLayout
+          nodes={nodes as unknown as AstrolabeNode[]}
+          edges={edges as unknown as AstrolabeEdge[]}
+          focusNodeId={lensFocusNodeId}
+          positionsRef={positionsRef}
+          onLayoutReady={onWarmupComplete}
+        />
+      ) : activeLayout === 'hierarchical' ? (
+        <HierarchicalLayout
+          nodes={nodes as unknown as AstrolabeNode[]}
+          edges={edges as unknown as AstrolabeEdge[]}
+          focusNodeId={lensFocusNodeId}
+          positionsRef={positionsRef}
+          direction={activeLensId === 'dependents' ? 'up' : 'down'}
+          onLayoutReady={onWarmupComplete}
+        />
+      ) : (
+        <ForceLayout
+          nodes={nodes}
+          edges={edges}
+          positionsRef={positionsRef}
+          draggingNodeId={draggingNodeId}
+          setDraggingNodeId={setDraggingNodeId}
+          running={true}
+          physics={physics}
+          savedPositionCount={savedPositionCount}
+          onStable={onStable}
+          onWarmupComplete={onWarmupComplete}
+          controlsRef={controlsRef}
+        />
+      )}
 
-      {layoutReady && edges.map(edge => {
+      {/* Use batched rendering for large graphs (single draw call) */}
+      {/* In sparse mode (>2000 edges), only show edges connected to selected/hovered node */}
+      {layoutReady && edges.length > BATCHED_EDGES_THRESHOLD && (() => {
+        const isSparseMode = edges.length > SPARSE_EDGES_THRESHOLD
+        const activeNodeId = hoveredNodeId || selectedNodeId
+
+        // In sparse mode with no selection, don't render any edges
+        if (isSparseMode && !activeNodeId) {
+          return null
+        }
+
+        // Filter edges to only show connected ones in sparse mode
+        const visibleEdges = isSparseMode
+          ? edges.filter(e => e.source === activeNodeId || e.target === activeNodeId)
+          : edges
+
+        if (visibleEdges.length === 0) return null
+
+        return (
+          <BatchedEdges
+            edges={visibleEdges}
+            positionsRef={positionsRef}
+            highlightedEdgeIds={batchedEdgeHighlightSets.highlighted}
+            dimmedEdgeIds={batchedEdgeHighlightSets.dimmed}
+          />
+        )
+      })()}
+
+      {/* Individual edge rendering for small graphs or highlighted edges */}
+      {layoutReady && edges.length <= BATCHED_EDGES_THRESHOLD && edges.map(edge => {
         if (!positionsRef.current.has(edge.source) || !positionsRef.current.has(edge.target)) return null
         const isInput = relatedEdges.inputs.has(edge.id)
         const isOutput = relatedEdges.outputs.has(edge.id)
@@ -531,6 +734,10 @@ function GraphScene({
         const isDimmed = highlightedEdge !== null && !isSelectedEdge
         const isHighlighted = !!(isInput || isOutput || isSelectedEdge)
         const isBidirectional = bidirectionalEdges.has(edge.id)
+        // When node has too many edges, use 'selected' type (no FlowPulse) to prevent FPS drop
+        const effectiveHighlightType = relatedEdges.disableFlowPulse
+          ? (isHighlighted ? 'selected' : 'none')
+          : (isSelectedEdge ? 'selected' : isInput ? 'input' : isOutput ? 'output' : 'none')
 
         return (
           <Edge3D
@@ -538,7 +745,7 @@ function GraphScene({
             edge={edge}
             positionsRef={positionsRef}
             isHighlighted={isHighlighted}
-            highlightType={isSelectedEdge ? 'selected' : isInput ? 'input' : isOutput ? 'output' : 'none'}
+            highlightType={effectiveHighlightType}
             isDimmed={isDimmed}
             isBidirectional={isBidirectional}
             onClick={edgeClickHandlers.get(edge.id)}
@@ -553,6 +760,8 @@ function GraphScene({
         const isEdgeEndpoint = highlightedEdge !== null && (node.id === highlightedEdge.source || node.id === highlightedEdge.target)
         const hasHiddenNeighbors = nodesWithHiddenNeighbors?.has(node.id) ?? false
 
+        const isBubbleNode = node.id.startsWith('group:')
+
         return (
           <Node3D
             key={node.id}
@@ -564,10 +773,14 @@ function GraphScene({
             isClickable={isAddingEdge && selectedNodeId !== node.id}
             isRemovable={isRemovingNodes}
             hasHiddenNeighbors={hasHiddenNeighbors}
-            onSelect={() => onNodeSelect(node)}
+            isBubble={isBubbleNode}
+            onSelect={() => handleNodeSelectWithBubble(node)}
             onHover={(h) => setHoveredNodeId(h ? node.id : null)}
             onDragStart={() => setDraggingNodeId(node.id)}
             onDragEnd={() => setDraggingNodeId(null)}
+            onContextMenu={isBubbleNode && onNodeContextMenu ? (e) => {
+              onNodeContextMenu(node, e.nativeEvent.clientX, e.nativeEvent.clientY)
+            } : undefined}
             isDragging={draggingNodeId === node.id}
             showLabel={showLabels}
           />
@@ -580,9 +793,15 @@ function GraphScene({
         enableZoom
         enableRotate
         minDistance={5}
-        maxDistance={100}
+        maxDistance={500}
         zoomSpeed={0.5}
         rotateSpeed={0.5}
+        // Use middle mouse for pan, left for rotate, leave right free for context menu
+        mouseButtons={{
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.PAN,
+          RIGHT: undefined as unknown as THREE.MOUSE,  // Disable right-click for orbit controls
+        }}
       />
       <CameraController targetPosition={focusPosition} enabled={shouldFocusNode} controlsRef={controlsRef} />
       <EdgeCameraController
@@ -605,6 +824,10 @@ function GraphScene({
         hasUserInteractedRef={hasUserInteractedRef}
         cameraInitKey={cameraInitKey}
         positionsCount={positionsCount}
+      />
+      <CameraZoomRecenter
+        positionsRef={positionsRef}
+        controlsRef={controlsRef}
       />
     </>
   )
@@ -634,6 +857,13 @@ export function ForceGraph3D({
   const [layoutStableTick, setLayoutStableTick] = useState(0)
   const [layoutReady, setLayoutReady] = useState(false)
   const hasShownLayout = useRef(false)
+
+  // Context menu state for namespace bubbles
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    group: NamespaceGroup
+  } | null>(null)
 
   // Convert customNodes to Node type
   const customNodesAsNodes: Node[] = useMemo(() => {
@@ -682,14 +912,44 @@ export function ForceGraph3D({
   const allNodes = useMemo(() => [...nodes, ...customNodesAsNodes], [nodes, customNodesAsNodes])
   const allEdges = useMemo(() => [...edges, ...customEdgesAsEdges], [edges, customEdgesAsEdges])
 
+  // Apply lens transformation
+  // Convert to AstrolabeNode for lens system (lens only uses common fields)
+  const lensResult = useLensedGraph(
+    allNodes as unknown as AstrolabeNode[],
+    allEdges as unknown as AstrolabeEdge[]
+  )
+  const { setLensFocusNode } = useLensActions()
+
+  // Get the transformed nodes/edges from lens (cast back to original types)
+  // The lens filter preserves all original node properties, just filters which nodes to show
+  const lensedNodes = lensResult.nodes as unknown as Node[]
+  const lensedEdges = lensResult.edges as unknown as Edge[]
+  const lensedGroups = lensResult.groups
+  const activeLayout = lensResult.layout
+  const activeLensId = lensResult.activeLensId
+  const isAwaitingFocus = lensResult.isAwaitingFocus
+  const lensFocusNodeId = lensResult.lensFocusNodeId
+
+  // Create a map from groupId to group for quick lookup
+  const groupsMap = useMemo(() => {
+    const map = new Map<string, NamespaceGroup>()
+    for (const g of lensedGroups) {
+      map.set(g.id, g)
+    }
+    return map
+  }, [lensedGroups])
+
   // Track previous node IDs to detect changes
   const prevNodeIdsRef = useRef<Set<string>>(new Set())
 
   // Get saved positions from canvasStore
   const canvasPositions = useCanvasStore((state) => state.positions)
 
-  // Record how many nodes have saved positions (to decide whether to skip physics simulation)
-  const [savedPositionCount, setSavedPositionCount] = useState(0)
+  // Compute how many nodes have saved positions (to decide whether to skip physics simulation)
+  // This must be recomputed each time, not accumulated
+  const savedPositionCount = useMemo(() => {
+    return allNodes.filter(n => canvasPositions[n.id]).length
+  }, [allNodes, canvasPositions])
 
   // Initialize node positions (including custom nodes)
   // Use nodeLifecycle module for intelligent position calculation
@@ -697,7 +957,6 @@ export function ForceGraph3D({
     if (allNodes.length === 0) {
       positionsRef.current.clear()
       prevNodeIdsRef.current.clear()
-      setSavedPositionCount(0)
       return
     }
 
@@ -715,20 +974,15 @@ export function ForceGraph3D({
     if (added.length > 0) {
       // Read saved positions from canvasStore.positions (3D: {x, y, z})
       const savedPositions = new Map<string, LifecyclePosition3D | undefined>()
-      let savedCount = 0
       for (const id of added) {
         const pos = canvasPositions[id]
         if (pos) {
           // Convert to [x, y, z] format
           savedPositions.set(id, [pos.x, pos.y, pos.z])
-          savedCount++
         } else {
           savedPositions.set(id, undefined)
         }
       }
-
-      // Update saved position count (accumulate with existing)
-      setSavedPositionCount(prev => prev + savedCount)
 
       // Get existing node positions (excluding those to be deleted)
       const existingPositions = new Map<string, LifecyclePosition3D>()
@@ -755,6 +1009,57 @@ export function ForceGraph3D({
     // Update tracked node IDs
     prevNodeIdsRef.current = currentIds
   }, [allNodes, allEdges, canvasPositions])
+
+  // Seed positions for bubble nodes (synthetic namespace groups)
+  // Bubbles aren't in allNodes, so they don't get positions from the main effect
+  // Spread bubbles in a circle/sphere pattern based on index for good initial separation
+  // This runs synchronously during render to ensure bubbles have positions before first paint
+  const bubblePositionsSeeded = useMemo(() => {
+    if (lensedGroups.length === 0) return 0
+
+    // Get collapsed groups only
+    const collapsedGroups = lensedGroups.filter(g => !g.expanded && !positionsRef.current.has(g.id))
+    if (collapsedGroups.length === 0) return 0
+
+    // Spread bubbles in a sphere pattern for good initial separation
+    // Use larger radius so bubbles aren't clustered together
+    const radius = Math.max(40, collapsedGroups.length * 4) // Scale radius with count
+
+    let seededCount = 0
+    for (let i = 0; i < collapsedGroups.length; i++) {
+      const group = collapsedGroups[i]
+
+      // Use golden angle spiral for even distribution on sphere
+      const phi = Math.acos(1 - 2 * (i + 0.5) / collapsedGroups.length)
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i
+
+      const x = radius * Math.sin(phi) * Math.cos(theta)
+      const y = radius * Math.sin(phi) * Math.sin(theta)
+      const z = radius * Math.cos(phi)
+
+      // Add small random jitter
+      const jitter = 2
+      positionsRef.current.set(group.id, [
+        x + (Math.random() - 0.5) * jitter,
+        y + (Math.random() - 0.5) * jitter,
+        z + (Math.random() - 0.5) * jitter,
+      ])
+      seededCount++
+    }
+
+    if (seededCount > 0) {
+      console.log(`[ForceGraph3D] Seeded ${seededCount} bubble positions in sphere pattern (radius: ${radius})`)
+    }
+    return seededCount
+  }, [lensedGroups, positionsRef.current.size]) // Re-run when groups change
+
+  // Force re-render after bubble positions are seeded (since ref changes don't trigger render)
+  const [, forceRender] = useState(0)
+  useEffect(() => {
+    if (bubblePositionsSeeded > 0) {
+      forceRender(n => n + 1)
+    }
+  }, [bubblePositionsSeeded])
 
   const handleNodeSelect = useCallback((node: Node | null) => onNodeSelect?.(node), [onNodeSelect])
   const handleEdgeSelect = useCallback((edge: { id: string; source: string; target: string } | null) => onEdgeSelect?.(edge), [onEdgeSelect])
@@ -795,18 +1100,55 @@ export function ForceGraph3D({
     )
   }
 
+  // Handle node click with lens awareness
+  const handleNodeSelectWithLens = useCallback((node: Node | null) => {
+    if (isAwaitingFocus && node) {
+      // If lens is waiting for focus, set the focus node instead of selecting
+      setLensFocusNode(node.id)
+      return
+    }
+    handleNodeSelect(node)
+  }, [isAwaitingFocus, setLensFocusNode, handleNodeSelect])
+
+  // Handle right-click on bubble nodes
+  const handleNodeContextMenu = useCallback((node: Node, clientX: number, clientY: number) => {
+    // Only show context menu for bubble nodes (namespace groups)
+    if (!node.id.startsWith('group:')) return
+
+    const group = groupsMap.get(node.id)
+    if (!group) return
+
+    setContextMenu({ x: clientX, y: clientY, group })
+  }, [groupsMap])
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null)
+  }, [])
+
+  // When awaiting focus, show ALL nodes so user can click one
+  // Otherwise show the lens-filtered nodes
+  const displayNodes = isAwaitingFocus ? allNodes : lensedNodes
+  const displayEdges = isAwaitingFocus ? allEdges : lensedEdges
+  const displayLayout = isAwaitingFocus ? 'force' : activeLayout
+
+  // Prevent browser context menu on the canvas to allow custom right-click handling
+  const handleCanvasContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+  }, [])
+
   return (
-    <div className="w-full h-full bg-[#0a0a0f]">
+    <div className="w-full h-full bg-[#0a0a0f] relative" onContextMenu={handleCanvasContextMenu}>
       <Canvas camera={{ position: [0, 0, 30], fov: 60 }} onPointerMissed={() => handleNodeSelect(null)}>
         <GraphScene
-          nodes={allNodes}
-          edges={allEdges}
+          nodes={displayNodes}
+          edges={displayEdges}
           positionsRef={positionsRef}
           selectedNodeId={selectedNodeId}
           focusNodeId={focusNodeId}
           focusEdgeId={focusEdgeId}
           highlightedEdge={highlightedEdge}
-          onNodeSelect={handleNodeSelect}
+          onNodeSelect={handleNodeSelectWithLens}
           onEdgeSelect={handleEdgeSelect}
           showLabels={showLabels}
           initialCameraPosition={initialCameraPosition}
@@ -821,11 +1163,58 @@ export function ForceGraph3D({
           layoutStableTick={layoutStableTick}
           layoutReady={layoutReady}
           onWarmupComplete={handleWarmupComplete}
+          activeLayout={displayLayout}
+          activeLensId={activeLensId}
+          lensFocusNodeId={lensFocusNodeId}
+          onNodeContextMenu={handleNodeContextMenu}
         />
       </Canvas>
+
+      {/* Lens awaiting focus overlay */}
+      {isAwaitingFocus && (
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
+          <div className="bg-gray-900/90 px-6 py-4 rounded-lg border border-purple-500/50 text-center">
+            <div className="text-purple-400 text-lg font-medium mb-1">Select Focus Node</div>
+            <div className="text-white/60 text-sm">Click a node to center the ego network around it</div>
+          </div>
+        </div>
+      )}
+
       <div className="absolute bottom-4 left-4 text-xs text-white/40 font-mono bg-black/60 px-2 py-1 rounded">
-        {nodes.length} nodes{customNodes.length > 0 ? ` + ${customNodes.length} custom` : ''} | {edges.length} edges{customEdges.length > 0 ? ` + ${customEdges.length} custom` : ''} | 3D
+        {activeLensId === 'namespaces' ? (
+          <>showing {displayNodes.length} bubbles ({allNodes.length} nodes) | {displayEdges.length} edges</>
+        ) : (
+          <>{displayNodes.length} nodes | {displayEdges.length} edges</>
+        )}
+        {customNodes.length > 0 ? ` + ${customNodes.length} custom` : ''}
       </div>
+      <DevPanel className="absolute top-4 right-4" />
+
+      {/* Bubble context menu */}
+      {contextMenu && (
+        <>
+          {/* Backdrop to close menu on click outside */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={closeContextMenu}
+            onContextMenu={(e) => {
+              // Just prevent browser menu, don't close our menu
+              // The native contextmenu event bubbles after the menu opens
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+          />
+          <BubbleContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            groupId={contextMenu.group.id}
+            namespace={contextMenu.group.namespace}
+            nodeCount={contextMenu.group.nodeCount}
+            isExpanded={contextMenu.group.expanded}
+            onClose={closeContextMenu}
+          />
+        </>
+      )}
     </div>
   )
 }

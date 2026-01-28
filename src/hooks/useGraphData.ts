@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { loadProject, refreshProject, checkProjectStatus, type ProjectStatus } from '@/lib/api'
+import { loadProject, getProject, refreshProject, checkProjectStatus, type ProjectStatus } from '@/lib/api'
 import type { Node, Edge } from '@/types/node'
 import type {
   AstrolabeNode,
@@ -212,11 +212,13 @@ export function useGraphData(projectPath: string): GraphData {
     }
   }, [projectPath])
 
-  // Meta refresh: only reload data, don't reset state
+  // Meta refresh: use getProject (GET) instead of loadProject (POST) for lighter reload
+  // This avoids re-parsing the project on the backend
   const reloadMeta = useCallback(async () => {
     if (!projectPath) return
     try {
-      const response = await loadProject(projectPath)
+      // Use getProject (GET) instead of loadProject (POST) - much lighter
+      const response = await getProject(projectPath)
 
       const astrolabeNodes = response.nodes.map(backendNodeToAstrolabe)
       const astrolabeEdges = response.edges.map(backendEdgeToAstrolabe)
