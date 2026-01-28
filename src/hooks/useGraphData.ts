@@ -23,6 +23,7 @@ import {
   type GraphFilterOptions,
   DEFAULT_FILTER_OPTIONS,
 } from '@/lib/graphProcessing'
+import { history } from '@/lib/history'
 
 // Re-export types for backward compatibility
 export type { GraphNode, GraphLink } from '@/types/graph'
@@ -233,9 +234,16 @@ export function useGraphData(projectPath: string): GraphData {
   }, [projectPath])
 
   // WebSocket file change monitoring
+  // Clear undo history on external changes (patches may no longer apply)
   useFileWatch(projectPath, {
-    onRefresh: reload,       // .ilean changes → full reload
-    onMetaRefresh: reloadMeta, // meta.json changes → only refresh meta
+    onRefresh: () => {
+      history.clear('External file change (Lean source)')
+      reload()
+    },
+    onMetaRefresh: () => {
+      history.clear('External file change (meta.json)')
+      reloadMeta()
+    },
   })
 
   // ============================================
