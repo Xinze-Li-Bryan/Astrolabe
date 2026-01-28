@@ -17,7 +17,6 @@ import {
     PencilSquareIcon,
     PlusIcon,
     ArrowPathIcon,
-    Cog6ToothIcon,
     EyeIcon,
     EyeSlashIcon,
     TagIcon,
@@ -29,7 +28,7 @@ import {
     InformationCircleIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
-import { getNamespaceDepthPreview } from '@/lib/graphProcessing'
+import { getNamespaceDepthPreview, groupNodesByNamespace } from '@/lib/graphProcessing'
 import { UIColors } from '@/lib/colors'
 import { PROOF_STATUS_CONFIG, type ProofStatusType } from '@/lib/proofStatus'
 import type { NodeKind, NodeStatus, AstrolabeNode, AstrolabeEdge } from '@/types/graph'
@@ -127,13 +126,16 @@ function LocalEditorContent() {
     const [infoPanelOpen, setInfoPanelOpen] = useState(true) // Node Info panel
     const [searchPanelOpen, setSearchPanelOpen] = useState(true) // Left search panel
     const [searchPanelKey, setSearchPanelKey] = useState(0) // Key to reset SearchPanel state
+    const [leftPanelMode, setLeftPanelMode] = useState<'search' | 'settings'>('search') // Left panel tab mode
     const [viewMode, setViewMode] = useState<ViewMode>('3d') // Default 3D view
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
+    const [focusClusterPosition, setFocusClusterPosition] = useState<[number, number, number] | null>(null) // Cluster centroid to focus on
+    const [highlightedNamespace, setHighlightedNamespace] = useState<{ namespace: string; nodeIds: Set<string> } | null>(null) // Highlighted namespace for dimming
     const [showLabels, setShowLabels] = useState(true) // Whether to show node labels
+    const getPositionsRef = useRef<(() => Map<string, [number, number, number]>) | null>(null) // Ref to get positions from ForceGraph3D
 
     // Physics settings for 3D force graph
-    const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
     const [physics, setPhysics] = useState<PhysicsParams>({ ...DEFAULT_PHYSICS })
     const [expandedInfoTips, setExpandedInfoTips] = useState<Set<string>>(new Set())
 
@@ -880,6 +882,44 @@ function LocalEditorContent() {
             }))
     }, [astrolabeEdges, canvasNodes])
 
+    // Compute namespaces that have nodes on canvas (for highlighting in namespace list)
+    const namespacesOnCanvas: Set<string> = useMemo(() => {
+        if (canvasNodes.length === 0) return new Set()
+        const groups = groupNodesByNamespace(canvasNodes as any, physics.clusteringDepth)
+        return new Set(groups.keys())
+    }, [canvasNodes, physics.clusteringDepth])
+
+    // Handle namespace click - focus on cluster centroid and highlight nodes
+    const handleNamespaceClick = useCallback((namespace: string) => {
+        if (!getPositionsRef.current) return
+
+        const positions = getPositionsRef.current()
+        const namespaceGroups = groupNodesByNamespace(canvasNodes as any, physics.clusteringDepth)
+        const nodesInNamespace = namespaceGroups.get(namespace)
+
+        if (!nodesInNamespace || nodesInNamespace.length === 0) return
+
+        // Collect node IDs for highlighting
+        const nodeIds = new Set(nodesInNamespace.map((n: any) => n.id))
+
+        // Compute centroid
+        let sumX = 0, sumY = 0, sumZ = 0, count = 0
+        for (const node of nodesInNamespace) {
+            const pos = positions.get(node.id)
+            if (pos) {
+                sumX += pos[0]
+                sumY += pos[1]
+                sumZ += pos[2]
+                count++
+            }
+        }
+
+        if (count > 0) {
+            setFocusClusterPosition([sumX / count, sumY / count, sumZ / count])
+            setHighlightedNamespace({ namespace, nodeIds })
+        }
+    }, [canvasNodes, physics.clusteringDepth])
+
     // Calculate which nodes have hidden neighbors (dependencies or dependents not on canvas)
     // These nodes should be highlighted to indicate they can be "expanded"
     const nodesWithHiddenNeighbors: Set<string> = useMemo(() => {
@@ -1369,16 +1409,419 @@ function LocalEditorContent() {
             <div className="flex-1 min-h-0 flex">
                 {/* Main horizontal panel group: Left + Center + Right */}
                 <PanelGroup direction="horizontal" className="flex-1">
-                    {/* Left: Search panel */}
+                    {/* Left: Search/Settings panel */}
                     {searchPanelOpen && (
                         <>
                             <Panel defaultSize={15} minSize={10} maxSize={30}>
-                                <SearchPanel
-                                    key={searchPanelKey}
-                                    className="h-full"
-                                    selectedNodeId={selectedNode?.id}
-                                    onNodeSelect={handleSearchResultSelect}
-                                />
+                                <div className="h-full flex flex-col bg-[#0d0d12]">
+                                    {/* Tab Header */}
+                                    <div className="flex border-b border-white/10 shrink-0">
+                                        <button
+                                            onClick={() => setLeftPanelMode('search')}
+                                            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                                                leftPanelMode === 'search'
+                                                    ? 'text-blue-400 border-b-2 border-blue-400 bg-blue-500/10'
+                                                    : 'text-white/50 hover:text-white/80'
+                                            }`}
+                                        >
+                                            Search
+                                        </button>
+                                        <button
+                                            onClick={() => setLeftPanelMode('settings')}
+                                            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                                                leftPanelMode === 'settings'
+                                                    ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-500/10'
+                                                    : 'text-white/50 hover:text-white/80'
+                                            }`}
+                                        >
+                                            Settings
+                                        </button>
+                                    </div>
+
+                                    {/* Tab Content */}
+                                    <div className="flex-1 overflow-hidden">
+                                        {leftPanelMode === 'search' ? (
+                                            <SearchPanel
+                                                key={searchPanelKey}
+                                                className="h-full"
+                                                selectedNodeId={selectedNode?.id}
+                                                onNodeSelect={handleSearchResultSelect}
+                                            />
+                                        ) : (
+                                            <div className="h-full overflow-y-auto p-3 space-y-4">
+                                                {/* === GRAPH SIMPLIFICATION === */}
+                                                <div>
+                                                    <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Graph Simplification</h4>
+                                                    <div className="space-y-2">
+                                                        {/* Hide Technical */}
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={filterOptions.hideTechnical}
+                                                                    onChange={(e) => setFilterOptions({ ...filterOptions, hideTechnical: e.target.checked })}
+                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                />
+                                                                <span className="text-xs text-white/80">Hide Technical</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('hideTechnical') ? next.delete('hideTechnical') : next.add('hideTechnical')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {expandedInfoTips.has('hideTechnical') && (
+                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                                    Hide auto-generated Lean nodes: type class instances, coercions, decidability proofs, and other implementation details.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        {/* Transitive Reduction */}
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={filterOptions.transitiveReduction ?? true}
+                                                                    onChange={(e) => setFilterOptions({ ...filterOptions, transitiveReduction: e.target.checked })}
+                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                />
+                                                                <span className="text-xs text-white/80">Transitive Reduction</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('transitiveReduction') ? next.delete('transitiveReduction') : next.add('transitiveReduction')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {expandedInfoTips.has('transitiveReduction') && (
+                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                                    Remove redundant edges: if path A→B→C exists, hide the direct A→C edge. Shows only essential dependencies.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        {/* Hide Orphaned */}
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={filterOptions.hideOrphaned ?? false}
+                                                                    onChange={(e) => setFilterOptions({ ...filterOptions, hideOrphaned: e.target.checked })}
+                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                />
+                                                                <span className="text-xs text-white/80">Hide Orphaned</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('hideOrphaned') ? next.delete('hideOrphaned') : next.add('hideOrphaned')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {expandedInfoTips.has('hideOrphaned') && (
+                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                                    Hide nodes that have no connections to other visible nodes. Useful for cleaning up isolated nodes.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* === LAYOUT OPTIMIZATION === */}
+                                                {viewMode === '3d' && (
+                                                    <div className="border-t border-white/10 pt-3">
+                                                        <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Layout Optimization</h4>
+
+                                                        {/* Namespace Clustering */}
+                                                        <div className="mb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={physics.clusteringEnabled}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, clusteringEnabled: e.target.checked }))}
+                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                />
+                                                                <span className="text-xs text-white/80">Namespace Clustering</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('clustering') ? next.delete('clustering') : next.add('clustering')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {expandedInfoTips.has('clustering') && (
+                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                                    Group nodes by Lean namespace. Nodes in the same module cluster together for better structure visualization.
+                                                                </p>
+                                                            )}
+                                                            {physics.clusteringEnabled && (
+                                                                <div className="mt-2 ml-5 space-y-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Compact</span>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0"
+                                                                            max="10"
+                                                                            step="0.5"
+                                                                            value={physics.clusteringStrength}
+                                                                            onChange={(e) => setPhysics(p => ({ ...p, clusteringStrength: Number(e.target.value) }))}
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                        />
+                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Separate</span>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0"
+                                                                            max="10"
+                                                                            step="0.5"
+                                                                            value={physics.clusterSeparation ?? 0.5}
+                                                                            onChange={(e) => setPhysics(p => ({ ...p, clusterSeparation: Number(e.target.value) }))}
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                        />
+                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="text-[10px] text-white/40 mb-1 block">Depth</label>
+                                                                        <select
+                                                                            value={physics.clusteringDepth}
+                                                                            onChange={(e) => setPhysics(p => ({ ...p, clusteringDepth: Number(e.target.value) }))}
+                                                                            className="w-full text-[10px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white/80"
+                                                                        >
+                                                                            {namespaceDepthPreview.map(info => (
+                                                                                <option key={info.depth} value={info.depth}>
+                                                                                    Depth {info.depth} ({info.count} groups)
+                                                                                </option>
+                                                                            ))}
+                                                                            {namespaceDepthPreview.length === 0 && (
+                                                                                <option value={1}>No namespaces found</option>
+                                                                            )}
+                                                                        </select>
+                                                                        {/* Show full namespace list for selected depth - clickable to focus */}
+                                                                        {namespaceDepthPreview.find(d => d.depth === physics.clusteringDepth) && (
+                                                                            <div className="mt-2 p-2 bg-black/30 rounded text-[10px] max-h-24 overflow-y-auto">
+                                                                                {namespaceDepthPreview.find(d => d.depth === physics.clusteringDepth)!.namespaces.map((ns, i) => {
+                                                                                    const isOnCanvas = namespacesOnCanvas.has(ns)
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={i}
+                                                                                            className={`block w-full text-left py-0.5 px-1 rounded transition-colors ${
+                                                                                                isOnCanvas
+                                                                                                    ? 'text-purple-400 hover:text-purple-300 hover:bg-purple-500/20'
+                                                                                                    : 'text-white/30 cursor-not-allowed'
+                                                                                            }`}
+                                                                                            onClick={() => isOnCanvas && handleNamespaceClick(ns)}
+                                                                                            disabled={!isOnCanvas}
+                                                                                            title={isOnCanvas ? `Focus on ${ns || '(root)'}` : 'No nodes on canvas'}
+                                                                                        >
+                                                                                            {isOnCanvas && <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-400 mr-1.5" />}
+                                                                                            {ns || '(root)'}
+                                                                                        </button>
+                                                                                    )
+                                                                                })}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Adaptive Springs */}
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={physics.adaptiveSpringEnabled}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringEnabled: e.target.checked }))}
+                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                />
+                                                                <span className="text-xs text-white/80">Adaptive Springs</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('adaptiveSprings') ? next.delete('adaptiveSprings') : next.add('adaptiveSprings')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {expandedInfoTips.has('adaptiveSprings') && (
+                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                                    High-degree hub nodes get longer edges automatically, preventing star-shaped clustering around heavily referenced nodes.
+                                                                </p>
+                                                            )}
+                                                            {physics.adaptiveSpringEnabled && (
+                                                                <div className="mt-2 ml-5 space-y-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Mode</span>
+                                                                        <select
+                                                                            value={physics.adaptiveSpringMode}
+                                                                            onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' }))}
+                                                                            className="flex-1 text-[10px] bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80"
+                                                                        >
+                                                                            <option value="sqrt">Square Root</option>
+                                                                            <option value="logarithmic">Logarithmic</option>
+                                                                            <option value="linear">Linear</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Scale</span>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0"
+                                                                            max="10"
+                                                                            step="0.5"
+                                                                            value={physics.adaptiveSpringScale}
+                                                                            onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringScale: Number(e.target.value) }))}
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                        />
+                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* === PHYSICS === */}
+                                                {viewMode === '3d' && (
+                                                    <div className="border-t border-white/10 pt-3">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400">Physics</h4>
+                                                            <button
+                                                                onClick={() => setExpandedInfoTips(prev => {
+                                                                    const next = new Set(prev)
+                                                                    next.has('physics') ? next.delete('physics') : next.add('physics')
+                                                                    return next
+                                                                })}
+                                                                className="text-white/30 hover:text-white/60"
+                                                            >
+                                                                <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                        {expandedInfoTips.has('physics') && (
+                                                            <p className="text-[10px] text-white/40 mb-2 bg-white/5 rounded p-2">
+                                                                Force-directed layout simulation parameters. Repulsion pushes nodes apart, springs pull connected nodes together, gravity pulls everything to center.
+                                                            </p>
+                                                        )}
+                                                        <div className="space-y-1.5">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Repulsion</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="10"
+                                                                    max="500"
+                                                                    step="10"
+                                                                    value={physics.repulsionStrength}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, repulsionStrength: Number(e.target.value) }))}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.repulsionStrength}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Edge Length</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="1"
+                                                                    max="20"
+                                                                    step="0.5"
+                                                                    value={physics.springLength}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, springLength: Number(e.target.value) }))}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.springLength}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Edge Tension</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="0.1"
+                                                                    max="10"
+                                                                    step="0.1"
+                                                                    value={physics.springStrength}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, springStrength: Number(e.target.value) }))}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.springStrength.toFixed(1)}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Gravity</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="0"
+                                                                    max="5"
+                                                                    step="0.1"
+                                                                    value={physics.centerStrength}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, centerStrength: Number(e.target.value) }))}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.centerStrength.toFixed(1)}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Damping</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="0.3"
+                                                                    max="0.95"
+                                                                    step="0.05"
+                                                                    value={physics.damping}
+                                                                    onChange={(e) => setPhysics(p => ({ ...p, damping: Number(e.target.value) }))}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* === ACTIONS === */}
+                                                <div className="border-t border-white/10 pt-3 space-y-2">
+                                                    {viewMode === '3d' && (
+                                                        <button
+                                                            onClick={() => setPhysics({ ...DEFAULT_PHYSICS })}
+                                                            className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors"
+                                                        >
+                                                            Reset Physics
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={handleClearCanvas}
+                                                        disabled={canvasNodes.length === 0}
+                                                        className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    >
+                                                        Clear Canvas
+                                                    </button>
+                                                    <button
+                                                        onClick={handleResetAllData}
+                                                        className="w-full py-1.5 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded transition-colors"
+                                                    >
+                                                        Reset All Data
+                                                    </button>
+                                                    <p className="text-[10px] text-white/30 text-center">
+                                                        Reset deletes all custom nodes, edges & metadata
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </Panel>
                             <PanelResizeHandle className="w-2 bg-white/10 hover:bg-blue-500/50 transition-colors cursor-col-resize flex items-center justify-center group">
                                 <div className="h-12 w-1 bg-white/20 group-hover:bg-white/40 rounded-full" />
@@ -1409,12 +1852,25 @@ function LocalEditorContent() {
                                     selectedNodeId={selectedNode?.id}
                                     focusNodeId={focusNodeId}
                                     focusEdgeId={focusEdgeId}
+                                    focusClusterPosition={focusClusterPosition}
                                     highlightedEdge={selectedEdge ? {
                                         id: selectedEdge.id,
                                         source: selectedEdge.source,
                                         target: selectedEdge.target
                                     } : null}
-                                    onNodeSelect={handleCanvasNodeClick}
+                                    highlightedNamespace={highlightedNamespace}
+                                    onNodeSelect={(node) => {
+                                        // Only clear namespace highlight if clicking a node outside the highlighted namespace
+                                        if (highlightedNamespace && node && !highlightedNamespace.nodeIds.has(node.id)) {
+                                            setHighlightedNamespace(null)
+                                            setFocusClusterPosition(null)
+                                        }
+                                        handleCanvasNodeClick(node)
+                                    }}
+                                    onBackgroundClick={() => {
+                                        setHighlightedNamespace(null) // Clear namespace highlight when clicking empty area
+                                        setFocusClusterPosition(null) // Clear cluster focus
+                                    }}
                                     onEdgeSelect={handleEdgeSelect}
                                     showLabels={showLabels}
                                     initialCameraPosition={initialViewport?.camera_position}
@@ -1424,6 +1880,7 @@ function LocalEditorContent() {
                                     isAddingEdge={isAddingEdge}
                                     isRemovingNodes={isRemovingNodes}
                                     nodesWithHiddenNeighbors={nodesWithHiddenNeighbors}
+                                    getPositionsRef={getPositionsRef}
                                 />
                             ) : (
                                 <SigmaGraph
@@ -1516,21 +1973,6 @@ function LocalEditorContent() {
                                     <TrashIcon className="w-4 h-4" />
                                 </button>
 
-                                {/* Physics settings button - only shown in 3D mode */}
-                                {viewMode === '3d' && (
-                                    <button
-                                        onClick={() => setShowPhysicsPanel(!showPhysicsPanel)}
-                                        className={`p-1.5 rounded transition-colors ${
-                                            showPhysicsPanel
-                                                ? 'bg-purple-500/30 text-purple-400'
-                                                : 'bg-black/60 text-white/60 hover:text-white hover:bg-white/20'
-                                        }`}
-                                        title="Physics Settings"
-                                    >
-                                        <Cog6ToothIcon className="w-4 h-4" />
-                                    </button>
-                                )}
-
                                 {/* In-canvas find button - TODO: backend to be developed
                                 <button
                                     onClick={() => {
@@ -1588,378 +2030,6 @@ function LocalEditorContent() {
                                 </button>
                                 */}
                             </div>
-
-                            {/* 物理设置面板 */}
-                            {showPhysicsPanel && viewMode === '3d' && (
-                                <div className="absolute top-14 left-3 z-10 bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg w-72 max-h-[80vh] overflow-y-auto">
-                                    {/* Header */}
-                                    <div className="flex items-center justify-between p-3 border-b border-white/10 sticky top-0 bg-black/90 backdrop-blur-sm">
-                                        <h3 className="text-sm font-medium text-white">Graph Settings</h3>
-                                        <button
-                                            onClick={() => setShowPhysicsPanel(false)}
-                                            className="text-white/40 hover:text-white"
-                                        >
-                                            <XMarkIcon className="w-4 h-4" />
-                                        </button>
-                                    </div>
-
-                                    <div className="p-3 space-y-4">
-                                        {/* === GRAPH SIMPLIFICATION === */}
-                                        <div>
-                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Graph Simplification</h4>
-                                            <div className="space-y-2">
-                                                {/* Hide Technical */}
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filterOptions.hideTechnical}
-                                                            onChange={(e) => setFilterOptions({ ...filterOptions, hideTechnical: e.target.checked })}
-                                                            className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
-                                                        />
-                                                        <span className="text-xs text-white/80">Hide Technical</span>
-                                                        <button
-                                                            onClick={() => setExpandedInfoTips(prev => {
-                                                                const next = new Set(prev)
-                                                                next.has('hideTechnical') ? next.delete('hideTechnical') : next.add('hideTechnical')
-                                                                return next
-                                                            })}
-                                                            className="ml-auto text-white/30 hover:text-white/60"
-                                                        >
-                                                            <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    </div>
-                                                    {expandedInfoTips.has('hideTechnical') && (
-                                                        <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                            Hide auto-generated Lean nodes: type class instances, coercions, decidability proofs, and other implementation details.
-                                                        </p>
-                                                    )}
-                                                </div>
-                                                {/* Transitive Reduction */}
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filterOptions.transitiveReduction ?? true}
-                                                            onChange={(e) => setFilterOptions({ ...filterOptions, transitiveReduction: e.target.checked })}
-                                                            className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
-                                                        />
-                                                        <span className="text-xs text-white/80">Transitive Reduction</span>
-                                                        <button
-                                                            onClick={() => setExpandedInfoTips(prev => {
-                                                                const next = new Set(prev)
-                                                                next.has('transitiveReduction') ? next.delete('transitiveReduction') : next.add('transitiveReduction')
-                                                                return next
-                                                            })}
-                                                            className="ml-auto text-white/30 hover:text-white/60"
-                                                        >
-                                                            <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    </div>
-                                                    {expandedInfoTips.has('transitiveReduction') && (
-                                                        <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                            Remove redundant edges: if path A→B→C exists, hide the direct A→C edge. Shows only essential dependencies.
-                                                        </p>
-                                                    )}
-                                                </div>
-                                                {/* Hide Orphaned */}
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={filterOptions.hideOrphaned ?? false}
-                                                            onChange={(e) => setFilterOptions({ ...filterOptions, hideOrphaned: e.target.checked })}
-                                                            className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
-                                                        />
-                                                        <span className="text-xs text-white/80">Hide Orphaned</span>
-                                                        <button
-                                                            onClick={() => setExpandedInfoTips(prev => {
-                                                                const next = new Set(prev)
-                                                                next.has('hideOrphaned') ? next.delete('hideOrphaned') : next.add('hideOrphaned')
-                                                                return next
-                                                            })}
-                                                            className="ml-auto text-white/30 hover:text-white/60"
-                                                        >
-                                                            <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    </div>
-                                                    {expandedInfoTips.has('hideOrphaned') && (
-                                                        <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                            Hide nodes that have no connections to other visible nodes. Useful for cleaning up isolated nodes.
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* === LAYOUT OPTIMIZATION === */}
-                                        <div className="border-t border-white/10 pt-3">
-                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Layout Optimization</h4>
-
-                                            {/* Namespace Clustering */}
-                                            <div className="mb-3">
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={physics.clusteringEnabled}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, clusteringEnabled: e.target.checked }))}
-                                                        className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
-                                                    />
-                                                    <span className="text-xs text-white/80">Namespace Clustering</span>
-                                                    <button
-                                                        onClick={() => setExpandedInfoTips(prev => {
-                                                            const next = new Set(prev)
-                                                            next.has('clustering') ? next.delete('clustering') : next.add('clustering')
-                                                            return next
-                                                        })}
-                                                        className="ml-auto text-white/30 hover:text-white/60"
-                                                    >
-                                                        <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                    </button>
-                                                </div>
-                                                {expandedInfoTips.has('clustering') && (
-                                                    <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                        Group nodes by Lean namespace. Nodes in the same module cluster together for better structure visualization.
-                                                    </p>
-                                                )}
-                                                {physics.clusteringEnabled && (
-                                                    <div className="mt-2 ml-5 space-y-2">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-white/40 w-14">Compact</span>
-                                                            <input
-                                                                type="range"
-                                                                min="0"
-                                                                max="10"
-                                                                step="0.5"
-                                                                value={physics.clusteringStrength}
-                                                                onChange={(e) => setPhysics(p => ({ ...p, clusteringStrength: Number(e.target.value) }))}
-                                                                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                            />
-                                                            <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-white/40 w-14">Separate</span>
-                                                            <input
-                                                                type="range"
-                                                                min="0"
-                                                                max="10"
-                                                                step="0.5"
-                                                                value={physics.clusterSeparation ?? 0.5}
-                                                                onChange={(e) => setPhysics(p => ({ ...p, clusterSeparation: Number(e.target.value) }))}
-                                                                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                            />
-                                                            <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
-                                                        </div>
-                                                        <div>
-                                                            <label className="text-[10px] text-white/40 mb-1 block">Depth</label>
-                                                            <select
-                                                                value={physics.clusteringDepth}
-                                                                onChange={(e) => setPhysics(p => ({ ...p, clusteringDepth: Number(e.target.value) }))}
-                                                                className="w-full text-[10px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white/80"
-                                                            >
-                                                                {namespaceDepthPreview.map(info => (
-                                                                    <option key={info.depth} value={info.depth}>
-                                                                        Depth {info.depth} ({info.count} groups)
-                                                                    </option>
-                                                                ))}
-                                                                {namespaceDepthPreview.length === 0 && (
-                                                                    <option value={1}>No namespaces found</option>
-                                                                )}
-                                                            </select>
-                                                            {/* Show full namespace list for selected depth */}
-                                                            {namespaceDepthPreview.find(d => d.depth === physics.clusteringDepth) && (
-                                                                <div className="mt-2 p-2 bg-black/30 rounded text-[10px] text-white/50 max-h-24 overflow-y-auto">
-                                                                    {namespaceDepthPreview.find(d => d.depth === physics.clusteringDepth)!.namespaces.map((ns, i) => (
-                                                                        <div key={i} className="py-0.5">{ns || '(root)'}</div>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Adaptive Springs */}
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={physics.adaptiveSpringEnabled}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringEnabled: e.target.checked }))}
-                                                        className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
-                                                    />
-                                                    <span className="text-xs text-white/80">Adaptive Springs</span>
-                                                    <button
-                                                        onClick={() => setExpandedInfoTips(prev => {
-                                                            const next = new Set(prev)
-                                                            next.has('adaptiveSprings') ? next.delete('adaptiveSprings') : next.add('adaptiveSprings')
-                                                            return next
-                                                        })}
-                                                        className="ml-auto text-white/30 hover:text-white/60"
-                                                    >
-                                                        <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                    </button>
-                                                </div>
-                                                {expandedInfoTips.has('adaptiveSprings') && (
-                                                    <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                        High-degree hub nodes get longer edges automatically, preventing star-shaped clustering around heavily referenced nodes.
-                                                    </p>
-                                                )}
-                                                {physics.adaptiveSpringEnabled && (
-                                                    <div className="mt-2 ml-5 space-y-2">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-white/40 w-14">Mode</span>
-                                                            <select
-                                                                value={physics.adaptiveSpringMode}
-                                                                onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' }))}
-                                                                className="flex-1 text-[10px] bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80"
-                                                            >
-                                                                <option value="sqrt">Square Root</option>
-                                                                <option value="logarithmic">Logarithmic</option>
-                                                                <option value="linear">Linear</option>
-                                                            </select>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-[10px] text-white/40 w-14">Scale</span>
-                                                            <input
-                                                                type="range"
-                                                                min="0"
-                                                                max="10"
-                                                                step="0.5"
-                                                                value={physics.adaptiveSpringScale}
-                                                                onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringScale: Number(e.target.value) }))}
-                                                                className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                            />
-                                                            <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* === PHYSICS === */}
-                                        <div className="border-t border-white/10 pt-3">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <h4 className="text-[10px] uppercase tracking-wider text-purple-400">Physics</h4>
-                                                <button
-                                                    onClick={() => setExpandedInfoTips(prev => {
-                                                        const next = new Set(prev)
-                                                        next.has('physics') ? next.delete('physics') : next.add('physics')
-                                                        return next
-                                                    })}
-                                                    className="text-white/30 hover:text-white/60"
-                                                >
-                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                </button>
-                                            </div>
-                                            {expandedInfoTips.has('physics') && (
-                                                <p className="text-[10px] text-white/40 mb-2 bg-white/5 rounded p-2">
-                                                    Force-directed layout simulation parameters. Repulsion pushes nodes apart, springs pull connected nodes together, gravity pulls everything to center.
-                                                </p>
-                                            )}
-                                            <div className="space-y-1.5">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-white/50 w-20">Repulsion</span>
-                                                    <input
-                                                        type="range"
-                                                        min="10"
-                                                        max="500"
-                                                        step="10"
-                                                        value={physics.repulsionStrength}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, repulsionStrength: Number(e.target.value) }))}
-                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                    />
-                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.repulsionStrength}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-white/50 w-20">Edge Length</span>
-                                                    <input
-                                                        type="range"
-                                                        min="1"
-                                                        max="20"
-                                                        step="0.5"
-                                                        value={physics.springLength}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, springLength: Number(e.target.value) }))}
-                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                    />
-                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.springLength}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-white/50 w-20">Edge Tension</span>
-                                                    <input
-                                                        type="range"
-                                                        min="0.1"
-                                                        max="10"
-                                                        step="0.1"
-                                                        value={physics.springStrength}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, springStrength: Number(e.target.value) }))}
-                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                    />
-                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.springStrength.toFixed(1)}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-white/50 w-20">Gravity</span>
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="5"
-                                                        step="0.1"
-                                                        value={physics.centerStrength}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, centerStrength: Number(e.target.value) }))}
-                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                    />
-                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.centerStrength.toFixed(1)}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] text-white/50 w-20">Damping</span>
-                                                    <input
-                                                        type="range"
-                                                        min="0.3"
-                                                        max="0.95"
-                                                        step="0.05"
-                                                        value={physics.damping}
-                                                        onChange={(e) => setPhysics(p => ({ ...p, damping: Number(e.target.value) }))}
-                                                        className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                                    />
-                                                    <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* === ACTIONS === */}
-                                        <div className="border-t border-white/10 pt-3">
-                                            <button
-                                                onClick={() => setPhysics({ ...DEFAULT_PHYSICS })}
-                                                className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors"
-                                            >
-                                                Reset to Default
-                                            </button>
-                                        </div>
-
-                                        {/* Divider */}
-                                        <div className="border-t border-white/10 pt-3 space-y-2">
-                                            {/* Clear Canvas Button - just hides nodes */}
-                                            <button
-                                                onClick={handleClearCanvas}
-                                                disabled={canvasNodes.length === 0}
-                                                className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                            >
-                                                Clear Canvas
-                                            </button>
-                                            {/* Reset All Data Button - destructive */}
-                                            <button
-                                                onClick={handleResetAllData}
-                                                className="w-full py-1.5 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded transition-colors"
-                                            >
-                                                Reset All Data
-                                            </button>
-                                            <p className="text-[10px] text-white/30 text-center">
-                                                Reset deletes all custom nodes, edges & metadata
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </Panel>
 
