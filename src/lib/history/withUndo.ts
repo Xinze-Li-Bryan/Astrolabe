@@ -10,7 +10,9 @@
  */
 
 import { produceWithPatches, enablePatches, type Draft } from 'immer'
-import { history, PatchCommand, type CommandScope } from './index'
+import { history } from './HistoryManager'
+import { PatchCommand } from './PatchCommand'
+import type { CommandScope } from './types'
 
 // Enable Immer patches globally
 enablePatches()

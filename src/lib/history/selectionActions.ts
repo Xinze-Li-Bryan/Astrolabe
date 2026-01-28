@@ -1,12 +1,67 @@
 /**
  * Undoable Selection Actions
  *
- * Wraps selection store mutations to make namespace highlight undoable via Cmd+Z.
- * Node/edge selection remain ephemeral (not undoable).
+ * Wraps selection store mutations to make them undoable via Cmd+Z.
+ * - Node selection: undoable
+ * - Edge selection: undoable
+ * - Namespace highlight: undoable
  */
 
 import { useSelectionStore, type NamespaceHighlight } from '@/lib/selectionStore'
 import { undoable } from './withUndo'
+
+/**
+ * Select a node (undoable)
+ *
+ * @param nodeId - Node ID to select, or null to clear selection
+ */
+export async function selectNodeUndoable(nodeId: string | null): Promise<void> {
+  const store = useSelectionStore
+  const oldNodeId = store.getState().selectedNodeId
+
+  // Don't record if same selection
+  if (nodeId === oldNodeId) return
+
+  const nodeName = nodeId ? nodeId.split('.').pop() || nodeId : null
+  const label = nodeId ? `Select: ${nodeName}` : 'Clear selection'
+
+  await undoable(
+    'ui',
+    label,
+    () => {
+      store.getState().selectNode(nodeId)
+    },
+    () => {
+      store.getState().selectNode(oldNodeId)
+    }
+  )
+}
+
+/**
+ * Select an edge (undoable)
+ *
+ * @param edgeId - Edge ID to select, or null to clear selection
+ */
+export async function selectEdgeUndoable(edgeId: string | null): Promise<void> {
+  const store = useSelectionStore
+  const oldEdgeId = store.getState().selectedEdgeId
+
+  // Don't record if same selection
+  if (edgeId === oldEdgeId) return
+
+  const label = edgeId ? `Select edge` : 'Clear edge selection'
+
+  await undoable(
+    'ui',
+    label,
+    () => {
+      store.getState().selectEdge(edgeId)
+    },
+    () => {
+      store.getState().selectEdge(oldEdgeId)
+    }
+  )
+}
 
 /**
  * Highlight a namespace (undoable)

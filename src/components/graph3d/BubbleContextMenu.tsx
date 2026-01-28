@@ -8,7 +8,8 @@
  */
 
 import { useCallback } from 'react'
-import { useLensStore } from '@/lib/lensStore'
+import { useLensActions } from '@/hooks/useLensedGraph'
+import { clearExpandedGroupsUndoable } from '@/lib/history/lensActions'
 
 export interface BubbleContextMenuProps {
   // Position
@@ -37,10 +38,8 @@ export function BubbleContextMenu({
   isExpanded,
   onClose,
 }: BubbleContextMenuProps) {
-  const toggleGroupExpanded = useLensStore(state => state.toggleGroupExpanded)
-  const clearExpandedGroups = useLensStore(state => state.clearExpandedGroups)
-  const setLensFocusNode = useLensStore(state => state.setLensFocusNode)
-  const setActiveLens = useLensStore(state => state.setActiveLens)
+  // Use undoable actions for Cmd+Z support
+  const { toggleGroupExpanded, setLensFocusNode, setActiveLens } = useLensActions()
 
   // Expand this group (shows sub-namespace bubbles)
   const handleExpand = useCallback(() => {
@@ -79,9 +78,9 @@ export function BubbleContextMenu({
 
   // Collapse all - reset to top-level namespace bubbles
   const handleCollapseAll = useCallback(() => {
-    clearExpandedGroups()
+    clearExpandedGroupsUndoable()
     onClose()
-  }, [clearExpandedGroups, onClose])
+  }, [onClose])
 
   // Get last segment of namespace for display
   const shortName = namespace.split('.').pop() || namespace

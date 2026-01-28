@@ -48,28 +48,34 @@ export async function toggleGroupExpandedUndoable(groupId: string): Promise<void
     ? `Collapse: ${groupName}`
     : `Expand: ${groupName}`
 
+  console.log(`[toggleGroupExpandedUndoable] called: ${groupId}, wasExpanded=${wasExpanded}`)
+
   await undoable(
     'lens',
     label,
     () => {
       const current = store.getState().expandedGroups
       const newExpanded = new Set(current)
+      console.log(`[toggleGroupExpanded] do(): wasExpanded=${wasExpanded}, current.has=${current.has(groupId)}`)
       if (wasExpanded) {
         newExpanded.delete(groupId)
       } else {
         newExpanded.add(groupId)
       }
       store.setState({ expandedGroups: newExpanded })
+      console.log(`[toggleGroupExpanded] do() done: newExpanded.has=${newExpanded.has(groupId)}`)
     },
     () => {
       const current = store.getState().expandedGroups
       const newExpanded = new Set(current)
+      console.log(`[toggleGroupExpanded] undo(): wasExpanded=${wasExpanded}, current.has=${current.has(groupId)}`)
       if (wasExpanded) {
         newExpanded.add(groupId)
       } else {
         newExpanded.delete(groupId)
       }
       store.setState({ expandedGroups: newExpanded })
+      console.log(`[toggleGroupExpanded] undo() done: newExpanded.has=${newExpanded.has(groupId)}`)
     }
   )
 }

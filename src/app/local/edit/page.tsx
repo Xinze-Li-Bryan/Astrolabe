@@ -76,7 +76,7 @@ import { useLensStore } from '@/lib/lensStore'
 import { useUndoShortcut } from '@/hooks/useUndoShortcut'
 import { graphActions } from '@/lib/history/graphActions'
 import { useSelectionStore } from '@/lib/selectionStore'
-import { highlightNamespaceUndoable, clearHighlightUndoable } from '@/lib/history/selectionActions'
+import { highlightNamespaceUndoable, clearHighlightUndoable, selectNodeUndoable, selectEdgeUndoable } from '@/lib/history/selectionActions'
 
 
 const getStatusLabel = (status: string) => {
@@ -133,8 +133,10 @@ function LocalEditorContent() {
     const [focusNodeId, setFocusNodeId] = useState<string | null>(null) // Node ID to focus on
     const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null) // Edge ID to focus on
     const [focusClusterPosition, setFocusClusterPosition] = useState<[number, number, number] | null>(null) // Cluster centroid to focus on
-    // Namespace highlighting (via selectionStore, undoable)
+    // Selection (via selectionStore, undoable)
     const highlightedNamespace = useSelectionStore(state => state.highlightedNamespace)
+    const storeSelectedNodeId = useSelectionStore(state => state.selectedNodeId)
+    const storeSelectedEdgeId = useSelectionStore(state => state.selectedEdgeId)
     const [showLabels, setShowLabels] = useState(true) // Whether to show node labels
     const getPositionsRef = useRef<(() => Map<string, [number, number, number]>) | null>(null) // Ref to get positions from ForceGraph3D
 
@@ -313,6 +315,10 @@ function LocalEditorContent() {
     const setSelectedNode = useCallback((node: GraphNode | null) => {
         setSelectedNodeState(node)
         setNodeClickCount(c => c + 1)  // Increment on each click, trigger highlight refresh
+
+        // Track in undo history
+        selectNodeUndoable(node?.id ?? null)
+
         // As long as node is selected and on canvas, focus on it
         // Check regular node or custom node
         const isOnCanvas = node && (
@@ -351,6 +357,26 @@ function LocalEditorContent() {
             }
         }
     }, [graphNodes, selectedNode])
+
+    // Sync local selectedNode with store (for undo/redo)
+    // When storeSelectedNodeId changes externally, find the node and update local state
+    useEffect(() => {
+        const currentId = selectedNode?.id ?? null
+        if (storeSelectedNodeId !== currentId) {
+            // Store changed (from undo/redo), sync local state
+            if (storeSelectedNodeId === null) {
+                setSelectedNodeState(null)
+            } else {
+                // Find the node in graphNodes or customNodes
+                const node = graphNodes.find(n => n.id === storeSelectedNodeId)
+                    || customNodes.find(n => n.id === storeSelectedNodeId) as GraphNode | undefined
+                if (node) {
+                    setSelectedNodeState(node)
+                    setNodeClickCount(c => c + 1)
+                }
+            }
+        }
+    }, [storeSelectedNodeId, graphNodes, customNodes, selectedNode?.id])
 
     // Handle adding custom edge
     const handleAddCustomEdge = useCallback(async (targetNodeId: string) => {

@@ -4,6 +4,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
  * Selection Actions Tests (Undoable)
  *
  * Tests for undoable selection actions:
+ * - Node selection with undo/redo
+ * - Edge selection with undo/redo
  * - Namespace highlight with undo/redo
  */
 
@@ -19,6 +21,115 @@ describe('selectionActions', () => {
       highlightedNamespace: null,
     })
     history.clear()
+  })
+
+  describe('selectNodeUndoable', () => {
+    it('should select a node', async () => {
+      const { useSelectionStore } = await import('../../selectionStore')
+      const { selectNodeUndoable } = await import('../selectionActions')
+
+      await selectNodeUndoable('Mathlib.Algebra.Group')
+
+      expect(useSelectionStore.getState().selectedNodeId).toBe('Mathlib.Algebra.Group')
+    })
+
+    it('should add command to undo stack', async () => {
+      const { history } = await import('../index')
+      const { selectNodeUndoable } = await import('../selectionActions')
+
+      await selectNodeUndoable('Mathlib.Algebra.Group')
+
+      const historyState = history.getState()
+      expect(historyState.canUndo).toBe(true)
+      expect(historyState.undoLabel).toContain('Group')
+    })
+
+    it('should undo node selection', async () => {
+      const { useSelectionStore } = await import('../../selectionStore')
+      const { history } = await import('../index')
+      const { selectNodeUndoable } = await import('../selectionActions')
+
+      // Select node
+      await selectNodeUndoable('Mathlib.Algebra.Group')
+      expect(useSelectionStore.getState().selectedNodeId).toBe('Mathlib.Algebra.Group')
+
+      // Undo
+      await history.undo()
+      expect(useSelectionStore.getState().selectedNodeId).toBeNull()
+    })
+
+    it('should undo to previous selection', async () => {
+      const { useSelectionStore } = await import('../../selectionStore')
+      const { history } = await import('../index')
+      const { selectNodeUndoable } = await import('../selectionActions')
+
+      // Select first node
+      await selectNodeUndoable('node-1')
+      // Select second node
+      await selectNodeUndoable('node-2')
+      expect(useSelectionStore.getState().selectedNodeId).toBe('node-2')
+
+      // Undo to first node
+      await history.undo()
+      expect(useSelectionStore.getState().selectedNodeId).toBe('node-1')
+
+      // Undo to no selection
+      await history.undo()
+      expect(useSelectionStore.getState().selectedNodeId).toBeNull()
+    })
+
+    it('should not record if same node selected', async () => {
+      const { history } = await import('../index')
+      const { selectNodeUndoable } = await import('../selectionActions')
+
+      await selectNodeUndoable('node-1')
+      const countAfterFirst = history.getState().undoCount
+
+      // Select same node again
+      await selectNodeUndoable('node-1')
+      expect(history.getState().undoCount).toBe(countAfterFirst)
+    })
+
+    it('should redo node selection', async () => {
+      const { useSelectionStore } = await import('../../selectionStore')
+      const { history } = await import('../index')
+      const { selectNodeUndoable } = await import('../selectionActions')
+
+      await selectNodeUndoable('node-1')
+      await history.undo()
+      expect(useSelectionStore.getState().selectedNodeId).toBeNull()
+
+      await history.redo()
+      expect(useSelectionStore.getState().selectedNodeId).toBe('node-1')
+    })
+  })
+
+  describe('selectEdgeUndoable', () => {
+    it('should select an edge', async () => {
+      const { useSelectionStore } = await import('../../selectionStore')
+      const { selectEdgeUndoable } = await import('../selectionActions')
+
+      await selectEdgeUndoable('edge-123')
+
+      expect(useSelectionStore.getState().selectedEdgeId).toBe('edge-123')
+    })
+
+    it('should undo edge selection', async () => {
+      const { useSelectionStore } = await import('../../selectionStore')
+      const { history } = await import('../index')
+      const { selectEdgeUndoable } = await import('../selectionActions')
+
+      await selectEdgeUndoable('edge-1')
+      await selectEdgeUndoable('edge-2')
+
+      // Undo to edge-1
+      await history.undo()
+      expect(useSelectionStore.getState().selectedEdgeId).toBe('edge-1')
+
+      // Undo to no selection
+      await history.undo()
+      expect(useSelectionStore.getState().selectedEdgeId).toBeNull()
+    })
   })
 
   describe('highlightNamespaceUndoable', () => {

@@ -57,15 +57,20 @@ export function useUndoShortcut() {
       if (!modKey || e.key.toLowerCase() !== 'z') return
 
       // Let focused elements handle their own undo
-      if (shouldDeferToElement()) return
+      if (shouldDeferToElement()) {
+        console.log('[useUndoShortcut] Deferring to focused element:', document.activeElement)
+        return
+      }
 
       e.preventDefault()
 
       if (e.shiftKey) {
         // Cmd+Shift+Z → Redo
+        console.log('[useUndoShortcut] Cmd+Shift+Z → redo()')
         await history.redo()
       } else {
         // Cmd+Z → Undo
+        console.log('[useUndoShortcut] Cmd+Z → undo()', history.getState())
         await history.undo()
       }
     }

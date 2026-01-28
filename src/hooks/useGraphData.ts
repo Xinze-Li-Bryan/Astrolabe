@@ -235,16 +235,16 @@ export function useGraphData(projectPath: string): GraphData {
 
   // WebSocket file change monitoring
   // Clear undo history on external changes (patches may no longer apply)
-  // But skip clearing if we're currently replaying (undo/redo) - those are our own writes
+  // But skip clearing if we're suppressing (recent undo/redo/execute) - those are our own writes
   useFileWatch(projectPath, {
     onRefresh: () => {
-      if (!history.replaying) {
+      if (!history.suppressingFileWatchEvents) {
         history.clear('External file change (Lean source)')
       }
       reload()
     },
     onMetaRefresh: () => {
-      if (!history.replaying) {
+      if (!history.suppressingFileWatchEvents) {
         history.clear('External file change (meta.json)')
       }
       reloadMeta()

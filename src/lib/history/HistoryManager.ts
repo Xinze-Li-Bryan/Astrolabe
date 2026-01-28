@@ -16,6 +16,7 @@ import type { Command, ExecuteOptions, HistoryState, HistoryListener, CommandSco
 
 const MAX_HISTORY_SIZE = 100
 const MERGE_WINDOW_MS = 750
+const FILEWATCH_SUPPRESS_MS = 1500 // Suppress filewatch clears for 1.5s after our writes
 
 export class HistoryManager {
   private undoStack: Command[] = []
@@ -25,14 +26,34 @@ export class HistoryManager {
   private transactionCommands: Command[] | null = null
   private transactionLabel: string | null = null
   private disabledScopes: Set<CommandScope> = new Set()
+  private suppressFileWatchUntil = 0
+
+  /**
+   * Arm suppression window to ignore filewatch events from our own writes
+   */
+  private suppressFileWatch(ms = FILEWATCH_SUPPRESS_MS): void {
+    this.suppressFileWatchUntil = Math.max(this.suppressFileWatchUntil, Date.now() + ms)
+  }
+
+  /**
+   * True if a filewatch event is likely caused by our own recent write.
+   * Use this to avoid clearing history when websocket detects our own changes.
+   */
+  get suppressingFileWatchEvents(): boolean {
+    return this.isReplaying || Date.now() < this.suppressFileWatchUntil
+  }
 
   /**
    * Execute a command and add it to the history
    */
   async execute(command: Command, options: ExecuteOptions = {}): Promise<void> {
+    // Suppress filewatch before doing anything (covers fast watcher signals)
+    this.suppressFileWatch()
+
     // If in transaction, collect commands
     if (this.transactionCommands !== null) {
       await command.do()
+      this.suppressFileWatch() // Suppress again after write
       this.transactionCommands.push(command)
       return
     }
@@ -40,12 +61,14 @@ export class HistoryManager {
     // Skip history during undo/redo replay
     if (options.skipHistory || this.isReplaying) {
       await command.do()
+      this.suppressFileWatch()
       return
     }
 
     // Check if scope is disabled
     if (this.disabledScopes.has(command.scope)) {
       await command.do()
+      this.suppressFileWatch()
       return
     }
 
@@ -63,6 +86,7 @@ export class HistoryManager {
         const merged = prev.merge(command)
         this.undoStack[this.undoStack.length - 1] = merged
         await command.do()
+        this.suppressFileWatch()
         this.notifyListeners()
         return
       }
@@ -70,6 +94,7 @@ export class HistoryManager {
 
     // Execute the command
     await command.do()
+    this.suppressFileWatch() // Suppress again to cover debounced watcher callbacks
 
     // Add to undo stack
     this.undoStack.push(command)
@@ -97,8 +122,10 @@ export class HistoryManager {
 
     console.log(`[HistoryManager] undo() - undoing: "${command.label}"`)
     this.isReplaying = true
+    this.suppressFileWatch()
     try {
       await command.undo()
+      this.suppressFileWatch() // Suppress again after write completes
       this.redoStack.push(command)
       this.notifyListeners()
       return true
@@ -115,8 +142,10 @@ export class HistoryManager {
     if (!command) return false
 
     this.isReplaying = true
+    this.suppressFileWatch()
     try {
       await command.do()
+      this.suppressFileWatch() // Suppress again after write completes
       this.undoStack.push(command)
       this.notifyListeners()
       return true
