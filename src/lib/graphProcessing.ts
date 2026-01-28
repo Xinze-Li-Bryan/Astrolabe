@@ -384,13 +384,13 @@ export function computeTransitiveReduction(
 // ============================================
 
 /**
- * Extract the namespace from a Lean declaration name
+ * Extract the namespace from a Lean declaration name (suffix-stripping mode)
  *
  * @param name - Full declaration name (e.g., "IChing.Hexagram.complement")
  * @param depth - How many levels up to go (1 = immediate parent, 2 = grandparent, etc.)
  * @returns The namespace (e.g., "IChing.Hexagram" for depth=1)
  */
-export function extractNamespace(name: string, depth: number = 1): string {
+export function extractNamespaceSuffix(name: string, depth: number = 1): string {
   if (!name) return ''
 
   const parts = name.split('.')
@@ -403,6 +403,29 @@ export function extractNamespace(name: string, depth: number = 1): string {
   }
 
   return filteredParts.slice(0, -depth).join('.')
+}
+
+/**
+ * Extract namespace prefix from a fully-qualified name (prefix mode)
+ * This is used for clustering - groups nodes by their common prefix.
+ *
+ * @param name - Full name like "Mathlib.Algebra.Group.Basic.add_comm"
+ * @param depth - How many segments to include (1 = "Mathlib", 2 = "Mathlib.Algebra", etc.)
+ * @returns Namespace prefix
+ *
+ * Important: Always excludes at least the leaf segment to enable grouping.
+ * For "Real.sinc" at depth 2, returns "Real" (not "Real.sinc") so all Real.* nodes group.
+ */
+export function extractNamespace(name: string, depth: number = 1): string {
+  if (!name || depth === 0) return name
+
+  const parts = name.split('.')
+  // Always leave at least one segment for the leaf (so siblings group together)
+  // For "Real.sinc" (2 parts) at depth 2: min(2, 2-1) = 1 → "Real"
+  // For "LeanCert.Core.Deriv.bound" (4 parts) at depth 2: min(2, 4-1) = 2 → "LeanCert.Core"
+  const nsDepth = Math.min(depth, parts.length - 1)
+  if (nsDepth <= 0) return parts[0] // Single segment names: use the name itself as namespace
+  return parts.slice(0, nsDepth).join('.')
 }
 
 /**

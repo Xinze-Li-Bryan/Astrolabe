@@ -38,6 +38,7 @@ export function BubbleContextMenu({
   onClose,
 }: BubbleContextMenuProps) {
   const toggleGroupExpanded = useLensStore(state => state.toggleGroupExpanded)
+  const clearExpandedGroups = useLensStore(state => state.clearExpandedGroups)
   const setLensFocusNode = useLensStore(state => state.setLensFocusNode)
   const setActiveLens = useLensStore(state => state.setActiveLens)
 
@@ -76,10 +77,14 @@ export function BubbleContextMenu({
     onClose()
   }, [nodeCount, setActiveLens, onClose])
 
+  // Collapse all - reset to top-level namespace bubbles
+  const handleCollapseAll = useCallback(() => {
+    clearExpandedGroups()
+    onClose()
+  }, [clearExpandedGroups, onClose])
+
   // Get last segment of namespace for display
   const shortName = namespace.split('.').pop() || namespace
-
-  console.log('[BubbleContextMenu] Rendering at', x, y, 'for', groupId)
 
   return (
     <div
@@ -128,6 +133,14 @@ export function BubbleContextMenu({
         </button>
 
         <div className="border-t border-gray-700 my-1" />
+
+        <button
+          onClick={handleCollapseAll}
+          className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 hover:text-white flex items-center gap-2"
+        >
+          <span className="text-gray-500">⏪</span>
+          Collapse All
+        </button>
 
         <button
           onClick={handleShowAll}

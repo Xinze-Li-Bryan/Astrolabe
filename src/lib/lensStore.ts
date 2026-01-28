@@ -33,6 +33,7 @@ interface LensStoreState {
   setLensFocusNode: (nodeId: string | null) => void
   setLensOptions: (options: Partial<LensOptions>) => void
   toggleGroupExpanded: (groupId: string) => void
+  clearExpandedGroups: () => void
   cancelLensActivation: () => void
   resetLens: () => void
 
@@ -68,6 +69,12 @@ export const useLensStore = create<LensStoreState>((set, get) => ({
     if (!isLensImplemented(lensId)) {
       console.warn(`[LensStore] Lens not yet implemented: ${lensId}`)
       // Still allow setting for UI purposes, but it won't do anything
+    }
+
+    // If selecting namespaces lens, auto-collapse all groups to start fresh
+    if (lensId === 'namespaces') {
+      set({ expandedGroups: new Set() })
+      console.log(`[LensStore] Auto-collapsed groups for namespaces lens`)
     }
 
     // If lens requires focus but we don't have one, enter awaiting state
@@ -119,6 +126,12 @@ export const useLensStore = create<LensStoreState>((set, get) => ({
       }
       return { expandedGroups: newExpanded }
     })
+  },
+
+  // Clear all expanded groups (collapse all back to top-level bubbles)
+  clearExpandedGroups: () => {
+    set({ expandedGroups: new Set() })
+    console.log('[LensStore] Collapsed all namespace groups')
   },
 
   // Cancel lens activation (user pressed Esc while awaiting focus)

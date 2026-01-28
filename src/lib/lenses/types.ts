@@ -17,6 +17,20 @@ export type Edge = AstrolabeEdge
 // Core Lens Types
 // ============================================
 
+// ============================================
+// Lens Settings Schema (for generic settings UI)
+// ============================================
+
+export interface LensSetting {
+  key: keyof LensOptions       // Which option this controls
+  label: string                // Display label
+  type: 'slider' | 'select' | 'toggle'
+  min?: number                 // For slider
+  max?: number                 // For slider
+  step?: number                // For slider (default: 1)
+  options?: { value: unknown; label: string }[]  // For select
+}
+
 export interface Lens {
   id: string
   name: string
@@ -38,6 +52,9 @@ export interface Lens {
   // Transform functions (defined separately, referenced by id)
   filterId: string | null      // null = no filtering (show all)
   aggregateId: string | null   // null = no aggregation (individual nodes)
+
+  // Settings schema for this lens (rendered by LensSettingsPanel)
+  settings?: LensSetting[]
 }
 
 export type LensLayout = 'force' | 'radial' | 'hierarchical'
@@ -109,8 +126,8 @@ export interface LensOptions {
 export const DEFAULT_LENS_OPTIONS: LensOptions = {
   nHop: 2,
   maxDepth: 10,
-  namespaceDepth: 1,
-  collapseThreshold: 5,
+  namespaceDepth: 2,
+  collapseThreshold: 3,
 }
 
 // ============================================

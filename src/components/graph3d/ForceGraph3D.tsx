@@ -504,6 +504,27 @@ function GraphScene({
   lensFocusNodeId?: string | null
   onNodeContextMenu?: (node: Node, clientX: number, clientY: number) => void
 }) {
+  // Get lens actions for bubble expansion
+  const { toggleGroupExpanded } = useLensActions()
+
+  // Handler that intercepts bubble clicks to toggle expansion instead of selecting
+  // This avoids expensive edge highlight computation for bubble nodes
+  const handleNodeSelectWithBubble = useCallback((node: Node | null) => {
+    if (!node) {
+      onNodeSelect(null)
+      return
+    }
+
+    // Bubble left-click: toggle expansion (fast path, no edge highlighting)
+    if (node.id.startsWith('group:')) {
+      toggleGroupExpanded(node.id)
+      return
+    }
+
+    // Normal node: proceed with selection
+    onNodeSelect(node)
+  }, [toggleGroupExpanded, onNodeSelect])
+
   // Node focus
   const focusPosition = focusNodeId ? positionsRef.current.get(focusNodeId) || null : null
   const prevFocusNodeId = useRef<string | null>(null)
@@ -539,18 +560,47 @@ function GraphScene({
   }, [])
   const positionsCount = positionsRef.current.size
 
-  // Calculate related edges
+  // Precompute adjacency once per edges change - O(E) once, then O(degree) per lookup
+  // This replaces the previous O(E) scan on every click/hover
+  const adjacency = useMemo(() => {
+    const inputs = new Map<string, string[]>()  // nodeId -> incoming edge ids
+    const outputs = new Map<string, string[]>() // nodeId -> outgoing edge ids
+    for (const e of edges) {
+      // Incoming edges (where this node is the target)
+      const targetList = inputs.get(e.target)
+      if (targetList) targetList.push(e.id)
+      else inputs.set(e.target, [e.id])
+
+      // Outgoing edges (where this node is the source)
+      const sourceList = outputs.get(e.source)
+      if (sourceList) sourceList.push(e.id)
+      else outputs.set(e.source, [e.id])
+    }
+    return { inputs, outputs }
+  }, [edges])
+
+  // Calculate related edges using precomputed adjacency - O(degree) instead of O(E)
+  // Cap FlowPulse effects when node has too many edges (prevents FPS drops)
+  const MAX_FLOWPULSE_EDGES = 20
   const relatedEdges = useMemo(() => {
     const activeId = hoveredNodeId || selectedNodeId
-    if (!activeId) return { inputs: new Set<string>(), outputs: new Set<string>() }
-    const inputs = new Set<string>()
-    const outputs = new Set<string>()
-    edges.forEach(e => {
-      if (e.target === activeId) inputs.add(e.id)
-      if (e.source === activeId) outputs.add(e.id)
-    })
-    return { inputs, outputs }
-  }, [hoveredNodeId, selectedNodeId, edges])
+    if (!activeId) return { inputs: new Set<string>(), outputs: new Set<string>(), disableFlowPulse: false }
+
+    // Skip edge highlighting for bubble nodes entirely (they toggle expansion, not selection)
+    if (activeId.startsWith('group:')) {
+      return { inputs: new Set<string>(), outputs: new Set<string>(), disableFlowPulse: true }
+    }
+
+    // O(degree) lookup instead of O(E) scan
+    const inputEdges = adjacency.inputs.get(activeId) ?? []
+    const outputEdges = adjacency.outputs.get(activeId) ?? []
+    const inputs = new Set(inputEdges)
+    const outputs = new Set(outputEdges)
+
+    // Disable flow pulse for high-degree nodes to prevent FPS drop
+    const disableFlowPulse = (inputs.size + outputs.size) > MAX_FLOWPULSE_EDGES
+    return { inputs, outputs, disableFlowPulse }
+  }, [hoveredNodeId, selectedNodeId, adjacency])
 
   // Detect bidirectional edges (A→B and B→A both exist)
   const bidirectionalEdges = useMemo(() => {
@@ -592,6 +642,20 @@ function GraphScene({
     })
     return handlers
   }, [edges, onEdgeSelect])
+
+  // Memoize highlight/dim sets for batched mode - prevents O(E) work per render
+  const batchedEdgeHighlightSets = useMemo(() => {
+    if (!highlightedEdge) return { highlighted: undefined, dimmed: undefined }
+    const highlightedKey = `${highlightedEdge.source}->${highlightedEdge.target}`
+    return {
+      highlighted: new Set([highlightedKey]),
+      dimmed: new Set(
+        edges
+          .filter(e => !(e.source === highlightedEdge.source && e.target === highlightedEdge.target))
+          .map(e => `${e.source}->${e.target}`)
+      ),
+    }
+  }, [highlightedEdge, edges])
 
   return (
     <>
@@ -655,12 +719,8 @@ function GraphScene({
           <BatchedEdges
             edges={visibleEdges}
             positionsRef={positionsRef}
-            highlightedEdgeIds={highlightedEdge ? new Set([`${highlightedEdge.source}->${highlightedEdge.target}`]) : undefined}
-            dimmedEdgeIds={highlightedEdge ? new Set(
-              visibleEdges
-                .filter(e => !(e.source === highlightedEdge.source && e.target === highlightedEdge.target))
-                .map(e => `${e.source}->${e.target}`)
-            ) : undefined}
+            highlightedEdgeIds={batchedEdgeHighlightSets.highlighted}
+            dimmedEdgeIds={batchedEdgeHighlightSets.dimmed}
           />
         )
       })()}
@@ -674,6 +734,10 @@ function GraphScene({
         const isDimmed = highlightedEdge !== null && !isSelectedEdge
         const isHighlighted = !!(isInput || isOutput || isSelectedEdge)
         const isBidirectional = bidirectionalEdges.has(edge.id)
+        // When node has too many edges, use 'selected' type (no FlowPulse) to prevent FPS drop
+        const effectiveHighlightType = relatedEdges.disableFlowPulse
+          ? (isHighlighted ? 'selected' : 'none')
+          : (isSelectedEdge ? 'selected' : isInput ? 'input' : isOutput ? 'output' : 'none')
 
         return (
           <Edge3D
@@ -681,7 +745,7 @@ function GraphScene({
             edge={edge}
             positionsRef={positionsRef}
             isHighlighted={isHighlighted}
-            highlightType={isSelectedEdge ? 'selected' : isInput ? 'input' : isOutput ? 'output' : 'none'}
+            highlightType={effectiveHighlightType}
             isDimmed={isDimmed}
             isBidirectional={isBidirectional}
             onClick={edgeClickHandlers.get(edge.id)}
@@ -710,7 +774,7 @@ function GraphScene({
             isRemovable={isRemovingNodes}
             hasHiddenNeighbors={hasHiddenNeighbors}
             isBubble={isBubbleNode}
-            onSelect={() => onNodeSelect(node)}
+            onSelect={() => handleNodeSelectWithBubble(node)}
             onHover={(h) => setHoveredNodeId(h ? node.id : null)}
             onDragStart={() => setDraggingNodeId(node.id)}
             onDragEnd={() => setDraggingNodeId(null)}
@@ -948,50 +1012,43 @@ export function ForceGraph3D({
 
   // Seed positions for bubble nodes (synthetic namespace groups)
   // Bubbles aren't in allNodes, so they don't get positions from the main effect
-  // Calculate their position as centroid of contained nodes
+  // Spread bubbles in a circle/sphere pattern based on index for good initial separation
   // This runs synchronously during render to ensure bubbles have positions before first paint
   const bubblePositionsSeeded = useMemo(() => {
     if (lensedGroups.length === 0) return 0
 
+    // Get collapsed groups only
+    const collapsedGroups = lensedGroups.filter(g => !g.expanded && !positionsRef.current.has(g.id))
+    if (collapsedGroups.length === 0) return 0
+
+    // Spread bubbles in a sphere pattern for good initial separation
+    // Use larger radius so bubbles aren't clustered together
+    const radius = Math.max(40, collapsedGroups.length * 4) // Scale radius with count
+
     let seededCount = 0
-    for (const group of lensedGroups) {
-      // Only process collapsed groups (bubbles) that don't have positions yet
-      if (group.expanded) continue
-      if (positionsRef.current.has(group.id)) continue
+    for (let i = 0; i < collapsedGroups.length; i++) {
+      const group = collapsedGroups[i]
 
-      // Calculate centroid from contained nodes
-      let cx = 0, cy = 0, cz = 0
-      let count = 0
+      // Use golden angle spiral for even distribution on sphere
+      const phi = Math.acos(1 - 2 * (i + 0.5) / collapsedGroups.length)
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i
 
-      for (const nodeId of group.nodeIds) {
-        const pos = positionsRef.current.get(nodeId)
-        if (pos) {
-          cx += pos[0]
-          cy += pos[1]
-          cz += pos[2]
-          count++
-        }
-      }
+      const x = radius * Math.sin(phi) * Math.cos(theta)
+      const y = radius * Math.sin(phi) * Math.sin(theta)
+      const z = radius * Math.cos(phi)
 
-      if (count > 0) {
-        cx /= count
-        cy /= count
-        cz /= count
-        positionsRef.current.set(group.id, [cx, cy, cz])
-        seededCount++
-      } else {
-        // No contained nodes have positions yet - use random position
-        const spread = 10
-        positionsRef.current.set(group.id, [
-          (Math.random() - 0.5) * spread,
-          (Math.random() - 0.5) * spread,
-          (Math.random() - 0.5) * spread,
-        ])
-        seededCount++
-      }
+      // Add small random jitter
+      const jitter = 2
+      positionsRef.current.set(group.id, [
+        x + (Math.random() - 0.5) * jitter,
+        y + (Math.random() - 0.5) * jitter,
+        z + (Math.random() - 0.5) * jitter,
+      ])
+      seededCount++
     }
+
     if (seededCount > 0) {
-      console.log(`[ForceGraph3D] Seeded ${seededCount} bubble positions`)
+      console.log(`[ForceGraph3D] Seeded ${seededCount} bubble positions in sphere pattern (radius: ${radius})`)
     }
     return seededCount
   }, [lensedGroups, positionsRef.current.size]) // Re-run when groups change
@@ -1055,26 +1112,13 @@ export function ForceGraph3D({
 
   // Handle right-click on bubble nodes
   const handleNodeContextMenu = useCallback((node: Node, clientX: number, clientY: number) => {
-    console.log('[ForceGraph3D] handleNodeContextMenu called:', node.id, clientX, clientY)
-
     // Only show context menu for bubble nodes (namespace groups)
-    if (!node.id.startsWith('group:')) {
-      console.log('[ForceGraph3D] Not a bubble node, ignoring')
-      return
-    }
+    if (!node.id.startsWith('group:')) return
 
     const group = groupsMap.get(node.id)
-    if (!group) {
-      console.log('[ForceGraph3D] Group not found in groupsMap for:', node.id)
-      return
-    }
+    if (!group) return
 
-    console.log('[ForceGraph3D] Opening context menu for group:', group)
-    setContextMenu({
-      x: clientX,
-      y: clientY,
-      group,
-    })
+    setContextMenu({ x: clientX, y: clientY, group })
   }, [groupsMap])
 
   // Close context menu

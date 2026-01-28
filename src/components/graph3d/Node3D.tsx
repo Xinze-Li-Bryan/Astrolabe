@@ -102,9 +102,15 @@ export const Node3D = memo(function Node3D({
   const bubbleGlowRef = useRef<THREE.Group>(null)
   const { gl } = useThree()
 
-  // Get initial position
-  const initialPos = positionsRef.current.get(node.id) || [0, 0, 0]
+  // Get initial position - use a ref to track if we've set it, and update on re-render
+  const initialPosFromRef = positionsRef.current.get(node.id)
+  const initialPos: [number, number, number] = initialPosFromRef || [0, 0, 0]
   const targetPos = useRef(new THREE.Vector3(...initialPos))
+
+  // Update targetPos if initialPos changed (e.g., after bubble positions are seeded)
+  if (initialPosFromRef) {
+    targetPos.current.set(...initialPosFromRef)
+  }
 
   // Color: use getNodeColor which handles fallback to KIND_COLORS
   const color = getNodeColor(node)
@@ -214,17 +220,6 @@ export const Node3D = memo(function Node3D({
 
     const ne = e.nativeEvent as PointerEvent
 
-    // Debug logging
-    console.log('[Node3D pointerDown]', {
-      nodeId: node.id,
-      isBubble,
-      hasOnContextMenu: !!onContextMenu,
-      button: ne.button,
-      buttons: ne.buttons,
-      ctrlKey: ne.ctrlKey,
-      metaKey: ne.metaKey,
-    })
-
     // Handle right-click (button 2 or buttons bitmask 2) or ctrl+click or cmd+click (macOS)
     // Use buttons bitmask for robust trackpad/browser detection
     const isRightClick = ne.button === 2 || ne.buttons === 2
@@ -232,7 +227,6 @@ export const Node3D = memo(function Node3D({
     const isCmdClick = ne.button === 0 && ne.metaKey
 
     if ((isRightClick || isCtrlClick || isCmdClick) && isBubble && onContextMenu) {
-      console.log('[Node3D] RIGHT-CLICK on bubble! Calling onContextMenu')
       ne.preventDefault()
       // Stop native event propagation to prevent OrbitControls from stealing the event
       ;(ne as unknown as { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.()
@@ -268,18 +262,11 @@ export const Node3D = memo(function Node3D({
 
   // Handle right-click for context menu (bubble nodes)
   const handleContextMenu = (e: ThreeEvent<MouseEvent>) => {
-    console.log('[Node3D contextMenu]', {
-      nodeId: node.id,
-      isBubble,
-      hasOnContextMenu: !!onContextMenu,
-    })
-
     // Always prevent the default browser context menu on right-click
     e.nativeEvent.preventDefault()
     e.stopPropagation()
 
     if (isBubble && onContextMenu) {
-      console.log('[Node3D] contextMenu triggering onContextMenu')
       onContextMenu(e)
     }
   }

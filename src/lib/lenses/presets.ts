@@ -40,7 +40,11 @@ export const LENSES: Lens[] = [
     },
     layout: 'force',
     filterId: null,
-    aggregateId: 'byNamespace',  // to be implemented in Phase 3
+    aggregateId: 'byNamespace',
+    settings: [
+      { key: 'namespaceDepth', label: 'Depth', type: 'slider', min: 1, max: 4 },
+      { key: 'collapseThreshold', label: 'Min nodes to collapse', type: 'slider', min: 2, max: 10 },
+    ],
   },
 
   // ============================================
@@ -53,8 +57,11 @@ export const LENSES: Lens[] = [
     icon: 'target',
     requiresFocus: true,
     layout: 'radial',
-    filterId: 'nHop',            // to be implemented in Phase 2
+    filterId: 'nHop',
     aggregateId: null,
+    settings: [
+      { key: 'nHop', label: 'Hops', type: 'slider', min: 1, max: 5 },
+    ],
   },
 
   // ============================================

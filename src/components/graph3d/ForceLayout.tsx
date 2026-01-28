@@ -95,9 +95,6 @@ interface ForceLayoutProps {
  * Execute one physics simulation step (pure calculation, no React dependency)
  * Used for warmup phase to quickly calculate stable positions
  */
-// Debug: throttle logging
-let lastLogTime = 0
-
 function simulateStep(
   nodes: Node[],
   edges: Edge[],
@@ -109,17 +106,6 @@ function simulateStep(
   nodeDegrees?: Map<string, NodeDegree> | null
 ): number {
   if (positions.size === 0) return 0
-
-  // Debug: count how many nodes have positions (throttled)
-  const now = Date.now()
-  if (now - lastLogTime > 2000) {
-    const bubbleNodes = nodes.filter(n => n.id.startsWith('group:'))
-    const nodesWithPositions = nodes.filter(n => positions.has(n.id))
-    if (bubbleNodes.length > 0) {
-      console.log(`[ForceLayout] Simulating ${nodes.length} nodes (${bubbleNodes.length} bubbles), ${nodesWithPositions.length} have positions, ${edges.length} edges`)
-    }
-    lastLogTime = now
-  }
 
   // Calculate forces
   const forces = new Map<string, [number, number, number]>()
@@ -605,13 +591,18 @@ export function ForceLayout({
 
     const positions = positionsRef.current
     if (!positions || positions.size === 0 || !running) {
-      if (devMode) recordFrameEnd(frameStart)
+      if (devMode) {
+        // Still update node/edge count even when not simulating
+        updateNodeEdgeCount(nodes.length, edges.length)
+        recordFrameEnd(frameStart)
+      }
       return
     }
 
     // Skip frames after stable to reduce CPU usage
     if (!draggingNodeId && stableFrames.current > 90) {
       if (devMode) {
+        updateNodeEdgeCount(nodes.length, edges.length)
         updateStableFrames(stableFrames.current)
         recordFrameEnd(frameStart)
       }
@@ -699,6 +690,11 @@ export function ForceLayout({
     const springStrength = physics.springStrength
 
     edges.forEach((edge) => {
+      // Skip spring forces for bubble nodes - they should only have repulsion
+      // This prevents bubbles from being pulled together by edges
+      const isBubbleEdge = edge.source.startsWith('group:') || edge.target.startsWith('group:')
+      if (isBubbleEdge) return
+
       const p1 = positions.get(edge.source)
       const p2 = positions.get(edge.target)
       if (!p1 || !p2) return
@@ -752,6 +748,58 @@ export function ForceLayout({
       f[1] -= pos[1] * centerStrength
       f[2] -= pos[2] * centerStrength
     })
+
+    // Bubble-to-bubble repulsion (bubbles are synthetic nodes not in the main nodes array)
+    // This ensures namespace bubbles spread out rather than clustering together
+    const bubbleIds = Array.from(positions.keys()).filter(id => id.startsWith('group:'))
+
+    // Apply center gravity to bubbles too (so they don't fly off)
+    bubbleIds.forEach((bubbleId) => {
+      const pos = positions.get(bubbleId)
+      if (!pos) return
+      if (!forces.has(bubbleId)) forces.set(bubbleId, [0, 0, 0])
+      const f = forces.get(bubbleId)!
+      f[0] -= pos[0] * centerStrength * 0.5 // Weaker center pull for bubbles
+      f[1] -= pos[1] * centerStrength * 0.5
+      f[2] -= pos[2] * centerStrength * 0.5
+    })
+
+    if (bubbleIds.length > 1) {
+      const bubbleRepulsionStrength = physics.repulsionStrength * 2 // Stronger repulsion for bubbles
+      for (let i = 0; i < bubbleIds.length; i++) {
+        for (let j = i + 1; j < bubbleIds.length; j++) {
+          const pos1 = positions.get(bubbleIds[i])
+          const pos2 = positions.get(bubbleIds[j])
+          if (!pos1 || !pos2) continue
+
+          const dx = pos2[0] - pos1[0]
+          const dy = pos2[1] - pos1[1]
+          const dz = pos2[2] - pos1[2]
+          const distSq = dx * dx + dy * dy + dz * dz
+          const dist = Math.sqrt(distSq) || 0.1
+          const minDist = 15 // Bubbles should stay at least this far apart
+
+          if (dist < minDist * 3) {
+            // Apply repulsion force
+            const effectiveDist = Math.max(dist, 1)
+            const force = bubbleRepulsionStrength / (effectiveDist * effectiveDist)
+
+            const fx = (dx / dist) * force
+            const fy = (dy / dist) * force
+            const fz = (dz / dist) * force
+
+            // Ensure forces exist for bubbles
+            if (!forces.has(bubbleIds[i])) forces.set(bubbleIds[i], [0, 0, 0])
+            if (!forces.has(bubbleIds[j])) forces.set(bubbleIds[j], [0, 0, 0])
+
+            const f1 = forces.get(bubbleIds[i])!
+            const f2 = forces.get(bubbleIds[j])!
+            f1[0] -= fx; f1[1] -= fy; f1[2] -= fz
+            f2[0] += fx; f2[1] += fy; f2[2] += fz
+          }
+        }
+      }
+    }
 
     // Namespace clustering force
     if (physics.clusteringEnabled && namespaceGroups) {
@@ -837,6 +885,40 @@ export function ForceLayout({
         pos[2] + vel[2] * dt,
       ]
       newPositions.set(node.id, newPos)
+
+      totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])
+    })
+
+    // Apply forces to bubble nodes (not in main nodes array)
+    bubbleIds.forEach((bubbleId) => {
+      const pos = positions.get(bubbleId)
+      const force = forces.get(bubbleId)
+      if (!pos || !force) return
+
+      const vel = velocities.current.get(bubbleId) || [0, 0, 0]
+
+      // Update velocity
+      vel[0] = (vel[0] + force[0] * dt) * damping
+      vel[1] = (vel[1] + force[1] * dt) * damping
+      vel[2] = (vel[2] + force[2] * dt) * damping
+
+      // Limit velocity
+      const speed = Math.sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2])
+      if (speed > maxVelocity) {
+        vel[0] *= maxVelocity / speed
+        vel[1] *= maxVelocity / speed
+        vel[2] *= maxVelocity / speed
+      }
+
+      velocities.current.set(bubbleId, vel)
+
+      // Update position
+      const newPos: [number, number, number] = [
+        pos[0] + vel[0] * dt,
+        pos[1] + vel[1] * dt,
+        pos[2] + vel[2] * dt,
+      ]
+      newPositions.set(bubbleId, newPos)
 
       totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])
     })

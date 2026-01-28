@@ -127,11 +127,7 @@ export function BatchedEdges({
 
     positionAttr.needsUpdate = true
     colorAttr.needsUpdate = true
-
-    // Compute bounding sphere so Three.js doesn't cull the geometry
-    if (hasValidPositions) {
-      geometry.computeBoundingSphere()
-    }
+    // Note: frustumCulled={false} so no need to computeBoundingSphere()
   })
 
   // Cleanup

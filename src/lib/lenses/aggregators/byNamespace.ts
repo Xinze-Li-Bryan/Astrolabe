@@ -28,12 +28,20 @@ import type {
  * @param name - Full name like "Mathlib.Algebra.Group.Basic.add_comm"
  * @param depth - How many segments to include (1 = "Mathlib", 2 = "Mathlib.Algebra", etc.)
  * @returns Namespace prefix
+ *
+ * Important: Always excludes at least the leaf segment to enable grouping.
+ * For "Real.sinc" at depth 2, returns "Real" (not "Real.sinc") so all Real.* nodes group.
  */
 export function extractNamespace(name: string, depth: number): string {
   if (!name || depth === 0) return name
 
   const parts = name.split('.')
-  const nsDepth = Math.min(depth, parts.length)
+  // Always leave at least one segment for the leaf (so siblings group together)
+  // For "Real.sinc" (2 parts) at depth 2: min(2, 2-1) = 1 → "Real"
+  // For "LeanCert.Core.Deriv.bound" (4 parts) at depth 2: min(2, 4-1) = 2 → "LeanCert.Core"
+  const nsDepth = Math.min(depth, parts.length - 1)
+  // Single segment names: group into special "(root)" namespace so they form a bubble
+  if (nsDepth <= 0) return '(root)'
   return parts.slice(0, nsDepth).join('.')
 }
 
@@ -152,7 +160,10 @@ function groupNodesRecursively(
       const maxNodeDepth = Math.max(...nsNodes.map(n => getNamespaceDepth(n.name)))
 
       // Can we create sub-namespaces?
-      if (maxNodeDepth > currentDepth) {
+      // Need > currentDepth + 1 because extractNamespace always excludes the leaf segment.
+      // Without this, nodes like "leancert.debug" (2 segments, namespace "leancert" at depth 1)
+      // would recurse forever since extractNamespace("leancert.debug", N) always returns "leancert"
+      if (maxNodeDepth > currentDepth + 1) {
         // Recurse at next depth level
         const subResult = groupNodesRecursively(
           nsNodes,
@@ -242,6 +253,9 @@ export const byNamespaceAggregator: LensAggregate = (
   // Combine bubble nodes and visible individual nodes
   const outputNodes = [...grouping.bubbleNodes, ...grouping.visibleNodes]
 
+  // Build visibility set once - O(N) instead of O(N) per edge
+  const visibleIds = new Set(outputNodes.map(n => n.id))
+
   // Transform edges
   const seenEdges = new Set<string>()
   const outputEdges: Edge[] = []
@@ -260,9 +274,8 @@ export const byNamespaceAggregator: LensAggregate = (
     }
 
     // Skip edges where both endpoints are hidden (in collapsed groups)
-    const sourceVisible = outputNodes.some(n => n.id === effectiveSource)
-    const targetVisible = outputNodes.some(n => n.id === effectiveTarget)
-    if (!sourceVisible || !targetVisible) {
+    // O(1) lookup instead of O(N) .some() - fixes O(E·N) → O(E)
+    if (!visibleIds.has(effectiveSource) || !visibleIds.has(effectiveTarget)) {
       continue
     }
 
