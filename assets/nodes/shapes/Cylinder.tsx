@@ -3,7 +3,7 @@ import type { NodeShape3DProps, NodeShape2DConfig } from '../../types'
 
 export function Cylinder3D({ size, color, isSelected }: NodeShape3DProps) {
   return (
-    <DreiCylinder args={[size, size, size * 1.5, 32]}>
+    <DreiCylinder args={[size, size, size * 1.5, 16]}>
       <meshStandardMaterial
         color={color}
         emissive={isSelected ? color : '#000000'}

@@ -67,6 +67,12 @@ const ForceGraph3D = dynamic(() => import('@/components/graph3d/ForceGraph3D'), 
 import type { PhysicsParams } from '@/components/graph3d/ForceGraph3D'
 import { DEFAULT_PHYSICS } from '@/components/graph3d/ForceLayout'
 
+// Import lens components
+import { LensPicker } from '@/components/LensPicker'
+import { LensIndicator } from '@/components/LensIndicator'
+import { useLensPickerShortcut } from '@/hooks/useLensPickerShortcut'
+import { useLensStore } from '@/lib/lensStore'
+
 
 const getStatusLabel = (status: string) => {
     switch (status) {
@@ -126,6 +132,9 @@ function LocalEditorContent() {
     const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
     const [physics, setPhysics] = useState<PhysicsParams>({ ...DEFAULT_PHYSICS })
     const [expandedInfoTips, setExpandedInfoTips] = useState<Set<string>>(new Set())
+
+    // Lens picker (Cmd+K)
+    const { isOpen: isLensPickerOpen, open: openLensPicker, close: closeLensPicker } = useLensPickerShortcut()
 
     // Viewport state (camera position persistence)
     const [initialViewport, setInitialViewport] = useState<ViewportData | null>(null)
@@ -243,6 +252,22 @@ function LocalEditorContent() {
     const namespaceDepthPreview = useMemo(() => {
         return getNamespaceDepthPreview(astrolabeNodes, 5)
     }, [astrolabeNodes])
+
+    // Auto-select lens for large graphs on first load
+    const autoSelectLens = useLensStore(state => state.autoSelectLens)
+    const hasAutoSelectedRef = useRef(false)
+    useEffect(() => {
+        // Only auto-select once per project load, and only for large graphs
+        if (!hasAutoSelectedRef.current && rawNodeCount > 300) {
+            hasAutoSelectedRef.current = true
+            autoSelectLens(rawNodeCount)
+        }
+    }, [rawNodeCount, autoSelectLens])
+
+    // Reset auto-select flag when project changes
+    useEffect(() => {
+        hasAutoSelectedRef.current = false
+    }, [projectPath])
 
     // Status colors - from unified proof status config (memoized for performance)
     const statusColors: Record<string, string> = useMemo(() =>
@@ -1238,6 +1263,8 @@ function LocalEditorContent() {
                         <HomeIcon className="w-4 h-4 text-white/60 hover:text-white" />
                     </button>
                     <span className="text-sm font-mono text-white/60 ml-2">{projectName}</span>
+                    <div className="w-px h-4 bg-white/20 ml-2" />
+                    <LensIndicator onClick={openLensPicker} />
                 </div>
                 <div className="flex items-center gap-2">
                     {/* View mode switch - temporarily hidden, 2D in development */}
@@ -2834,6 +2861,13 @@ function LocalEditorContent() {
                     </div>
                 </div>
             )}
+
+            {/* Lens Picker (Cmd+K) */}
+            <LensPicker
+                isOpen={isLensPickerOpen}
+                onClose={closeLensPicker}
+                nodeCount={canvasNodes.length}
+            />
         </div>
     )
 }

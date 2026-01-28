@@ -23,6 +23,7 @@ function isTauri(): boolean {
 // Cache for Tauri HTTP fetch function
 let cachedTauriFetch: typeof fetch | null = null;
 let tauriFetchInitialized = false;
+let warnedTauriHttpPermission = false;
 
 /**
  * Initialize Tauri HTTP fetch (called once)
@@ -62,7 +63,11 @@ async function tauriFetch(
     try {
       return await tauriHttp(input, init);
     } catch (error) {
-      console.warn("[API] Tauri HTTP request failed, falling back to standard fetch:", error);
+      // Only warn once to avoid spamming console
+      if (!warnedTauriHttpPermission) {
+        warnedTauriHttpPermission = true;
+        console.warn("[API] Tauri HTTP request failed, falling back to standard fetch:", error);
+      }
     }
   }
 

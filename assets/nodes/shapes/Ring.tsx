@@ -3,7 +3,7 @@ import type { NodeShape3DProps, NodeShape2DConfig } from '../../types'
 
 export function Ring3D({ size, color, isSelected }: NodeShape3DProps) {
   return (
-    <DreiRing args={[size * 0.5, size, 32]}>
+    <DreiRing args={[size * 0.5, size, 24]}>
       <meshStandardMaterial
         color={color}
         side={2}

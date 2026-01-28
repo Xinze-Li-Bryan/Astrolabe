@@ -3,7 +3,7 @@ import type { NodeShape3DProps, NodeShape2DConfig } from '../../types'
 
 export function Sphere3D({ size, color, isSelected }: NodeShape3DProps) {
   return (
-    <DreiSphere args={[size, 32, 32]}>
+    <DreiSphere args={[size, 16, 12]}>
       <meshStandardMaterial
         color={color}
         emissive={isSelected ? color : '#000000'}
