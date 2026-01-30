@@ -10,6 +10,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { LENSES, isLensAvailable } from '@/lib/lenses/presets'
 import { useLensStore } from '@/lib/lensStore'
+import { useLensActions } from '@/hooks/useLensedGraph'
 import type { Lens } from '@/lib/lenses/types'
 
 // Icon mapping (using simple emoji for now, can be replaced with lucide icons)
@@ -33,7 +34,7 @@ export function LensPicker({ isOpen, onClose, nodeCount = 0 }: LensPickerProps) 
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const setActiveLens = useLensStore(state => state.setActiveLens)
+  const { setActiveLens } = useLensActions() // Undoable
   const activeLensId = useLensStore(state => state.activeLensId)
 
   // Filter lenses by query and availability

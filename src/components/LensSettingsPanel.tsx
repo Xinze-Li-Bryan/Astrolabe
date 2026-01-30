@@ -7,8 +7,9 @@
  * Also handles focus node display and re-selection for lenses that require focus.
  */
 
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
 import { useLensStore, selectActiveLens } from '@/lib/lensStore'
+import { setLensOptionsUndoable } from '@/lib/history/lensActions'
 import type { LensSetting, LensOptions } from '@/lib/lenses/types'
 
 // Icon mapping (same as LensIndicator)
@@ -36,9 +37,12 @@ export function LensSettingsPanel({
   const panelRef = useRef<HTMLDivElement>(null)
   const lens = useLensStore(selectActiveLens)
   const options = useLensStore(state => state.options)
-  const setLensOptions = useLensStore(state => state.setLensOptions)
   const lensFocusNodeId = useLensStore(state => state.lensFocusNodeId)
-  const setActivationState = useLensStore(state => state.setActiveLens)
+
+  // Use undoable action for option changes
+  const handleOptionChange = useCallback((key: keyof LensOptions, value: unknown) => {
+    setLensOptionsUndoable({ [key]: value }, String(key))
+  }, [])
 
   // Request focus change - re-enter awaiting-focus mode
   const requestFocusChange = () => {
@@ -148,7 +152,7 @@ export function LensSettingsPanel({
               key={setting.key}
               setting={setting}
               value={options[setting.key]}
-              onChange={(value) => setLensOptions({ [setting.key]: value })}
+              onChange={(value) => handleOptionChange(setting.key, value)}
             />
           ))}
         </div>
