@@ -96,8 +96,8 @@ npm run dev:all    # Launch frontend + backend
 
 ## Maintainers
 
-**[Xinze Li](https://lixinze.xyz/)** (University of Toronto / Fields Institute)  
-**[Alejandro Radisic](https://github.com/alerad)** (Creator of [LeanCert](https://github.com/alerad/leancert))
+**[Xinze Li](https://lixinze.xyz/)**  
+**[Alejandro Radisic](https://github.com/alerad)**
 
 Want to contribute? Open an issue or reach out to us!
 
