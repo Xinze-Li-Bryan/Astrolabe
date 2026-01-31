@@ -94,16 +94,12 @@ cd backend && pip install -e ".[dev]" && cd ..
 npm run dev:all    # Launch frontend + backend
 ```
 
-## Contributors
+## Maintainers
 
-Thanks to all contributors who help make Astrolabe better!
+**[Xinze Li](https://lixinze.xyz/)** (University of Toronto / Fields Institute)  
+**[Alejandro Radisic](https://github.com/alerad)** (Creator of [LeanCert](https://github.com/alerad/leancert))
 
----
-
-## About
-
-**Created by [Xinze Li](https://lixinze.xyz/)**
-Fields Institute Centre for Mathematical AI | University of Toronto
+Want to contribute? Open an issue or reach out to us!
 
 ## License
 
