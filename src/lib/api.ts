@@ -474,6 +474,21 @@ export interface FilterOptionsData {
   transitiveReduction: boolean;
 }
 
+export interface PhysicsSettingsData {
+  repulsionStrength?: number;
+  springLength?: number;
+  springStrength?: number;
+  centerStrength?: number;
+  damping?: number;
+  clusteringEnabled?: boolean;
+  clusteringStrength?: number;
+  clusterSeparation?: number;
+  clusteringDepth?: number;
+  adaptiveSpringEnabled?: boolean;
+  adaptiveSpringMode?: string;
+  adaptiveSpringScale?: number;
+}
+
 export interface ViewportData {
   camera_position: [number, number, number];
   camera_target: [number, number, number];
@@ -481,6 +496,7 @@ export interface ViewportData {
   selected_node_id?: string;
   selected_edge_id?: string;
   filter_options?: FilterOptionsData;
+  physics_settings?: PhysicsSettingsData;
 }
 
 /**

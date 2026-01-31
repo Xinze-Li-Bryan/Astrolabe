@@ -75,6 +75,7 @@ import { useLensStore } from '@/lib/lensStore'
 // Import undo system
 import { useUndoShortcut } from '@/hooks/useUndoShortcut'
 import { graphActions } from '@/lib/history/graphActions'
+import { viewportActions } from '@/lib/history/viewportActions'
 import { useSelectionStore } from '@/lib/selectionStore'
 import { highlightNamespaceUndoable, clearHighlightUndoable, selectNodeUndoable, selectEdgeUndoable } from '@/lib/history/selectionActions'
 
@@ -422,6 +423,28 @@ function LocalEditorContent() {
         setIsEditingCustomNodeName(false)
     }, [selectedNode, editingCustomNodeNameValue])
 
+    // Undoable filter options update
+    const updateFilterOptionsUndoable = useCallback(async (newOptions: typeof filterOptions) => {
+        if (!projectPath) return
+        await viewportActions.updateFilterOptions(
+            projectPath,
+            newOptions,
+            filterOptions,
+            setFilterOptions
+        )
+    }, [projectPath, filterOptions, setFilterOptions])
+
+    // Undoable physics settings update
+    const updatePhysicsUndoable = useCallback(async (newPhysics: typeof physics) => {
+        if (!projectPath) return
+        await viewportActions.updatePhysics(
+            projectPath,
+            newPhysics,
+            physics,
+            setPhysics
+        )
+    }, [projectPath, physics])
+
     // When selected node is added to canvas, automatically focus on it
     const prevVisibleNodesRef = useRef<string[]>([])
     useEffect(() => {
@@ -664,7 +687,7 @@ function LocalEditorContent() {
         }
     }, [projectPath, setCanvasProjectPath, loadCanvas])
 
-    // Load viewport state (camera position and filter options)
+    // Load viewport state (camera position, filter options, and physics settings)
     useEffect(() => {
         if (!projectPath || viewportLoaded) return
 
@@ -678,6 +701,25 @@ function LocalEditorContent() {
                         hideOrphaned: viewport.filter_options.hideOrphaned ?? false,
                         transitiveReduction: viewport.filter_options.transitiveReduction ?? true,
                     })
+                }
+                // Restore physics settings from viewport
+                if (viewport.physics_settings) {
+                    const ps = viewport.physics_settings
+                    setPhysics(prev => ({
+                        ...prev,
+                        ...(ps.repulsionStrength !== undefined && { repulsionStrength: ps.repulsionStrength }),
+                        ...(ps.springLength !== undefined && { springLength: ps.springLength }),
+                        ...(ps.springStrength !== undefined && { springStrength: ps.springStrength }),
+                        ...(ps.centerStrength !== undefined && { centerStrength: ps.centerStrength }),
+                        ...(ps.damping !== undefined && { damping: ps.damping }),
+                        ...(ps.clusteringEnabled !== undefined && { clusteringEnabled: ps.clusteringEnabled }),
+                        ...(ps.clusteringStrength !== undefined && { clusteringStrength: ps.clusteringStrength }),
+                        ...(ps.clusterSeparation !== undefined && { clusterSeparation: ps.clusterSeparation }),
+                        ...(ps.clusteringDepth !== undefined && { clusteringDepth: ps.clusteringDepth }),
+                        ...(ps.adaptiveSpringEnabled !== undefined && { adaptiveSpringEnabled: ps.adaptiveSpringEnabled }),
+                        ...(ps.adaptiveSpringMode !== undefined && { adaptiveSpringMode: ps.adaptiveSpringMode as 'sqrt' | 'logarithmic' | 'linear' }),
+                        ...(ps.adaptiveSpringScale !== undefined && { adaptiveSpringScale: ps.adaptiveSpringScale }),
+                    }))
                 }
                 setViewportLoaded(true)
             })
@@ -1476,7 +1518,7 @@ function LocalEditorContent() {
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={filterOptions.hideTechnical}
-                                                                    onChange={(e) => setFilterOptions({ ...filterOptions, hideTechnical: e.target.checked })}
+                                                                    onChange={(e) => updateFilterOptionsUndoable({ ...filterOptions, hideTechnical: e.target.checked })}
                                                                     className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
                                                                 />
                                                                 <span className="text-xs text-white/80">Hide Technical</span>
@@ -1503,7 +1545,7 @@ function LocalEditorContent() {
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={filterOptions.transitiveReduction ?? true}
-                                                                    onChange={(e) => setFilterOptions({ ...filterOptions, transitiveReduction: e.target.checked })}
+                                                                    onChange={(e) => updateFilterOptionsUndoable({ ...filterOptions, transitiveReduction: e.target.checked })}
                                                                     className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
                                                                 />
                                                                 <span className="text-xs text-white/80">Transitive Reduction</span>
@@ -1530,7 +1572,7 @@ function LocalEditorContent() {
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={filterOptions.hideOrphaned ?? false}
-                                                                    onChange={(e) => setFilterOptions({ ...filterOptions, hideOrphaned: e.target.checked })}
+                                                                    onChange={(e) => updateFilterOptionsUndoable({ ...filterOptions, hideOrphaned: e.target.checked })}
                                                                     className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
                                                                 />
                                                                 <span className="text-xs text-white/80">Hide Orphaned</span>
@@ -1565,7 +1607,7 @@ function LocalEditorContent() {
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={physics.clusteringEnabled}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, clusteringEnabled: e.target.checked }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringEnabled: e.target.checked })}
                                                                     className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
                                                                 />
                                                                 <span className="text-xs text-white/80">Namespace Clustering</span>
@@ -1595,7 +1637,7 @@ function LocalEditorContent() {
                                                                             max="10"
                                                                             step="0.5"
                                                                             value={physics.clusteringStrength}
-                                                                            onChange={(e) => setPhysics(p => ({ ...p, clusteringStrength: Number(e.target.value) }))}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringStrength: Number(e.target.value) })}
                                                                             className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                         />
                                                                         <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
@@ -1608,7 +1650,7 @@ function LocalEditorContent() {
                                                                             max="10"
                                                                             step="0.5"
                                                                             value={physics.clusterSeparation ?? 0.5}
-                                                                            onChange={(e) => setPhysics(p => ({ ...p, clusterSeparation: Number(e.target.value) }))}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusterSeparation: Number(e.target.value) })}
                                                                             className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                         />
                                                                         <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
@@ -1617,7 +1659,7 @@ function LocalEditorContent() {
                                                                         <label className="text-[10px] text-white/40 mb-1 block">Depth</label>
                                                                         <select
                                                                             value={physics.clusteringDepth}
-                                                                            onChange={(e) => setPhysics(p => ({ ...p, clusteringDepth: Number(e.target.value) }))}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringDepth: Number(e.target.value) })}
                                                                             className="w-full text-[10px] bg-white/10 border border-white/20 rounded px-2 py-1 text-white/80"
                                                                         >
                                                                             {namespaceDepthPreview.map(info => (
@@ -1664,7 +1706,7 @@ function LocalEditorContent() {
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={physics.adaptiveSpringEnabled}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringEnabled: e.target.checked }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringEnabled: e.target.checked })}
                                                                     className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
                                                                 />
                                                                 <span className="text-xs text-white/80">Adaptive Springs</span>
@@ -1690,7 +1732,7 @@ function LocalEditorContent() {
                                                                         <span className="text-[10px] text-white/40 w-14">Mode</span>
                                                                         <select
                                                                             value={physics.adaptiveSpringMode}
-                                                                            onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' }))}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' })}
                                                                             className="flex-1 text-[10px] bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80"
                                                                         >
                                                                             <option value="sqrt">Square Root</option>
@@ -1706,7 +1748,7 @@ function LocalEditorContent() {
                                                                             max="10"
                                                                             step="0.5"
                                                                             value={physics.adaptiveSpringScale}
-                                                                            onChange={(e) => setPhysics(p => ({ ...p, adaptiveSpringScale: Number(e.target.value) }))}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringScale: Number(e.target.value) })}
                                                                             className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                         />
                                                                         <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
@@ -1747,7 +1789,7 @@ function LocalEditorContent() {
                                                                     max="500"
                                                                     step="10"
                                                                     value={physics.repulsionStrength}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, repulsionStrength: Number(e.target.value) }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, repulsionStrength: Number(e.target.value) })}
                                                                     className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.repulsionStrength}</span>
@@ -1760,7 +1802,7 @@ function LocalEditorContent() {
                                                                     max="20"
                                                                     step="0.5"
                                                                     value={physics.springLength}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, springLength: Number(e.target.value) }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, springLength: Number(e.target.value) })}
                                                                     className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.springLength}</span>
@@ -1773,7 +1815,7 @@ function LocalEditorContent() {
                                                                     max="10"
                                                                     step="0.1"
                                                                     value={physics.springStrength}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, springStrength: Number(e.target.value) }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, springStrength: Number(e.target.value) })}
                                                                     className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.springStrength.toFixed(1)}</span>
@@ -1786,7 +1828,7 @@ function LocalEditorContent() {
                                                                     max="5"
                                                                     step="0.1"
                                                                     value={physics.centerStrength}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, centerStrength: Number(e.target.value) }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, centerStrength: Number(e.target.value) })}
                                                                     className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.centerStrength.toFixed(1)}</span>
@@ -1799,7 +1841,7 @@ function LocalEditorContent() {
                                                                     max="0.95"
                                                                     step="0.05"
                                                                     value={physics.damping}
-                                                                    onChange={(e) => setPhysics(p => ({ ...p, damping: Number(e.target.value) }))}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, damping: Number(e.target.value) })}
                                                                     className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
@@ -1812,7 +1854,7 @@ function LocalEditorContent() {
                                                 <div className="border-t border-white/10 pt-3 space-y-2">
                                                     {viewMode === '3d' && (
                                                         <button
-                                                            onClick={() => setPhysics({ ...DEFAULT_PHYSICS })}
+                                                            onClick={() => updatePhysicsUndoable({ ...DEFAULT_PHYSICS })}
                                                             className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors"
                                                         >
                                                             Reset Physics

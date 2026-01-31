@@ -5,7 +5,7 @@
  * Commands are the atomic unit of the history system.
  */
 
-export type CommandScope = 'graph' | 'lens' | 'canvas' | 'ui'
+export type CommandScope = 'graph' | 'lens' | 'canvas' | 'ui' | 'viewport'
 
 export interface Command {
   /** Unique identifier for debugging */
