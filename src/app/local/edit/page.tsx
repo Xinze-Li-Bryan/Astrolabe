@@ -14,7 +14,6 @@ import {
     CodeBracketIcon,
     CubeIcon,
     SwatchIcon,
-    PencilSquareIcon,
     PlusIcon,
     ArrowPathIcon,
     EyeIcon,
@@ -24,8 +23,11 @@ import {
     ChevronDownIcon,
     ArrowsPointingOutIcon,
     TrashIcon,
-    DocumentTextIcon,
     InformationCircleIcon,
+    FunnelIcon,
+    CubeTransparentIcon,
+    BoltIcon,
+    WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
 import { getNamespaceDepthPreview, groupNodesByNamespace } from '@/lib/graphProcessing'
@@ -221,6 +223,20 @@ function LocalEditorContent() {
     const [showReloadPrompt, setShowReloadPrompt] = useState(false)
     const [showClearCanvasDialog, setShowClearCanvasDialog] = useState(false)
     const [selectedNodesToRemove, setSelectedNodesToRemove] = useState<Set<string>>(new Set())
+
+    // Settings panel collapsible sections
+    const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+    const toggleSection = useCallback((section: string) => {
+        setCollapsedSections(prev => {
+            const next = new Set(prev)
+            if (next.has(section)) {
+                next.delete(section)
+            } else {
+                next.add(section)
+            }
+            return next
+        })
+    }, [])
 
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
@@ -1471,26 +1487,26 @@ function LocalEditorContent() {
                     {/* Left: Search/Settings panel */}
                     {searchPanelOpen && (
                         <>
-                            <Panel defaultSize={15} minSize={10} maxSize={30}>
-                                <div className="h-full flex flex-col bg-[#0d0d12]">
+                            <Panel defaultSize={18} minSize={15} maxSize={35}>
+                                <div className="h-full flex flex-col bg-black border-r border-white/10">
                                     {/* Tab Header */}
                                     <div className="flex border-b border-white/10 shrink-0">
                                         <button
                                             onClick={() => setLeftPanelMode('search')}
-                                            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                                            className={`flex-1 px-3 py-2.5 text-xs font-medium transition-colors ${
                                                 leftPanelMode === 'search'
-                                                    ? 'text-blue-400 border-b-2 border-blue-400 bg-blue-500/10'
-                                                    : 'text-white/50 hover:text-white/80'
+                                                    ? 'text-white/90 bg-white/5'
+                                                    : 'text-white/40 hover:text-white/60'
                                             }`}
                                         >
                                             Search
                                         </button>
                                         <button
                                             onClick={() => setLeftPanelMode('settings')}
-                                            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                                            className={`flex-1 px-3 py-2.5 text-xs font-medium transition-colors ${
                                                 leftPanelMode === 'settings'
-                                                    ? 'text-purple-400 border-b-2 border-purple-400 bg-purple-500/10'
-                                                    : 'text-white/50 hover:text-white/80'
+                                                    ? 'text-white/90 bg-white/5'
+                                                    : 'text-white/40 hover:text-white/60'
                                             }`}
                                         >
                                             Settings
@@ -1510,8 +1526,16 @@ function LocalEditorContent() {
                                             <div className="h-full overflow-y-auto p-3 space-y-4">
                                                 {/* === GRAPH SIMPLIFICATION === */}
                                                 <div>
-                                                    <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Graph Simplification</h4>
-                                                    <div className="space-y-2">
+                                                    <button
+                                                        onClick={() => toggleSection('graphSimplification')}
+                                                        className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                    >
+                                                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('graphSimplification') ? '-rotate-90' : ''}`} />
+                                                        <FunnelIcon className="w-4 h-4" />
+                                                        <span className="text-[10px] uppercase tracking-wider font-medium">Graph Simplification</span>
+                                                    </button>
+                                                    {!collapsedSections.has('graphSimplification') && (
+                                                    <div className="space-y-2 ml-5 mt-1">
                                                         {/* Hide Technical */}
                                                         <div>
                                                             <div className="flex items-center gap-2">
@@ -1519,7 +1543,7 @@ function LocalEditorContent() {
                                                                     type="checkbox"
                                                                     checked={filterOptions.hideTechnical}
                                                                     onChange={(e) => updateFilterOptionsUndoable({ ...filterOptions, hideTechnical: e.target.checked })}
-                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
                                                                 />
                                                                 <span className="text-xs text-white/80">Hide Technical</span>
                                                                 <button
@@ -1546,7 +1570,7 @@ function LocalEditorContent() {
                                                                     type="checkbox"
                                                                     checked={filterOptions.transitiveReduction ?? true}
                                                                     onChange={(e) => updateFilterOptionsUndoable({ ...filterOptions, transitiveReduction: e.target.checked })}
-                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
                                                                 />
                                                                 <span className="text-xs text-white/80">Transitive Reduction</span>
                                                                 <button
@@ -1573,7 +1597,7 @@ function LocalEditorContent() {
                                                                     type="checkbox"
                                                                     checked={filterOptions.hideOrphaned ?? false}
                                                                     onChange={(e) => updateFilterOptionsUndoable({ ...filterOptions, hideOrphaned: e.target.checked })}
-                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
                                                                 />
                                                                 <span className="text-xs text-white/80">Hide Orphaned</span>
                                                                 <button
@@ -1594,13 +1618,22 @@ function LocalEditorContent() {
                                                             )}
                                                         </div>
                                                     </div>
+                                                    )}
                                                 </div>
 
                                                 {/* === LAYOUT OPTIMIZATION === */}
                                                 {viewMode === '3d' && (
                                                     <div className="border-t border-white/10 pt-3">
-                                                        <h4 className="text-[10px] uppercase tracking-wider text-purple-400 mb-2">Layout Optimization</h4>
-
+                                                        <button
+                                                            onClick={() => toggleSection('layoutOptimization')}
+                                                            className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                        >
+                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('layoutOptimization') ? '-rotate-90' : ''}`} />
+                                                            <CubeTransparentIcon className="w-4 h-4" />
+                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Layout Optimization</span>
+                                                        </button>
+                                                        {!collapsedSections.has('layoutOptimization') && (
+                                                        <div className="ml-5 mt-1">
                                                         {/* Namespace Clustering */}
                                                         <div className="mb-3">
                                                             <div className="flex items-center gap-2">
@@ -1608,7 +1641,7 @@ function LocalEditorContent() {
                                                                     type="checkbox"
                                                                     checked={physics.clusteringEnabled}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringEnabled: e.target.checked })}
-                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
                                                                 />
                                                                 <span className="text-xs text-white/80">Namespace Clustering</span>
                                                                 <button
@@ -1638,7 +1671,7 @@ function LocalEditorContent() {
                                                                             step="0.5"
                                                                             value={physics.clusteringStrength}
                                                                             onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringStrength: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                         />
                                                                         <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
                                                                     </div>
@@ -1651,7 +1684,7 @@ function LocalEditorContent() {
                                                                             step="0.5"
                                                                             value={physics.clusterSeparation ?? 0.5}
                                                                             onChange={(e) => updatePhysicsUndoable({ ...physics, clusterSeparation: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                         />
                                                                         <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
                                                                     </div>
@@ -1681,14 +1714,14 @@ function LocalEditorContent() {
                                                                                             key={i}
                                                                                             className={`block w-full text-left py-0.5 px-1 rounded transition-colors ${
                                                                                                 isOnCanvas
-                                                                                                    ? 'text-purple-400 hover:text-purple-300 hover:bg-purple-500/20'
+                                                                                                    ? 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/20'
                                                                                                     : 'text-white/30 cursor-not-allowed'
                                                                                             }`}
                                                                                             onClick={() => isOnCanvas && handleNamespaceClick(ns)}
                                                                                             disabled={!isOnCanvas}
                                                                                             title={isOnCanvas ? `Focus on ${ns || '(root)'}` : 'No nodes on canvas'}
                                                                                         >
-                                                                                            {isOnCanvas && <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-400 mr-1.5" />}
+                                                                                            {isOnCanvas && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 mr-1.5" />}
                                                                                             {ns || '(root)'}
                                                                                         </button>
                                                                                     )
@@ -1707,7 +1740,7 @@ function LocalEditorContent() {
                                                                     type="checkbox"
                                                                     checked={physics.adaptiveSpringEnabled}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringEnabled: e.target.checked })}
-                                                                    className="rounded bg-white/20 border-white/30 text-purple-500 focus:ring-purple-500"
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
                                                                 />
                                                                 <span className="text-xs text-white/80">Adaptive Springs</span>
                                                                 <button
@@ -1749,38 +1782,48 @@ function LocalEditorContent() {
                                                                             step="0.5"
                                                                             value={physics.adaptiveSpringScale}
                                                                             onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringScale: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                         />
                                                                         <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
                                                                     </div>
                                                                 </div>
                                                             )}
                                                         </div>
+                                                        </div>
+                                                        )}
                                                     </div>
                                                 )}
 
                                                 {/* === PHYSICS === */}
                                                 {viewMode === '3d' && (
                                                     <div className="border-t border-white/10 pt-3">
-                                                        <div className="flex items-center gap-2 mb-2">
-                                                            <h4 className="text-[10px] uppercase tracking-wider text-purple-400">Physics</h4>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                onClick={() => toggleSection('physics')}
+                                                                className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                            >
+                                                                <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('physics') ? '-rotate-90' : ''}`} />
+                                                                <BoltIcon className="w-4 h-4" />
+                                                                <span className="text-[10px] uppercase tracking-wider font-medium">Physics</span>
+                                                            </button>
                                                             <button
                                                                 onClick={() => setExpandedInfoTips(prev => {
                                                                     const next = new Set(prev)
                                                                     next.has('physics') ? next.delete('physics') : next.add('physics')
                                                                     return next
                                                                 })}
-                                                                className="text-white/30 hover:text-white/60"
+                                                                className="text-white/30 hover:text-white/60 p-1"
                                                             >
                                                                 <InformationCircleIcon className="w-3.5 h-3.5" />
                                                             </button>
                                                         </div>
                                                         {expandedInfoTips.has('physics') && (
-                                                            <p className="text-[10px] text-white/40 mb-2 bg-white/5 rounded p-2">
+                                                            <p className="text-[10px] text-white/40 mb-2 ml-5 bg-white/5 rounded p-2">
                                                                 Force-directed layout simulation parameters. Repulsion pushes nodes apart, springs pull connected nodes together, gravity pulls everything to center.
                                                             </p>
                                                         )}
-                                                        <div className="space-y-1.5">
+                                                        {!collapsedSections.has('physics') && (
+                                                        <div className="space-y-1.5 ml-5 mt-1">
                                                             <div className="flex items-center gap-2">
                                                                 <span className="text-[10px] text-white/50 w-20">Repulsion</span>
                                                                 <input
@@ -1790,7 +1833,7 @@ function LocalEditorContent() {
                                                                     step="10"
                                                                     value={physics.repulsionStrength}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, repulsionStrength: Number(e.target.value) })}
-                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.repulsionStrength}</span>
                                                             </div>
@@ -1803,7 +1846,7 @@ function LocalEditorContent() {
                                                                     step="0.5"
                                                                     value={physics.springLength}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, springLength: Number(e.target.value) })}
-                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.springLength}</span>
                                                             </div>
@@ -1816,7 +1859,7 @@ function LocalEditorContent() {
                                                                     step="0.1"
                                                                     value={physics.springStrength}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, springStrength: Number(e.target.value) })}
-                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.springStrength.toFixed(1)}</span>
                                                             </div>
@@ -1829,7 +1872,7 @@ function LocalEditorContent() {
                                                                     step="0.1"
                                                                     value={physics.centerStrength}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, centerStrength: Number(e.target.value) })}
-                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.centerStrength.toFixed(1)}</span>
                                                             </div>
@@ -1842,16 +1885,27 @@ function LocalEditorContent() {
                                                                     step="0.05"
                                                                     value={physics.damping}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, damping: Number(e.target.value) })}
-                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
                                                             </div>
                                                         </div>
+                                                        )}
                                                     </div>
                                                 )}
 
                                                 {/* === ACTIONS === */}
-                                                <div className="border-t border-white/10 pt-3 space-y-2">
+                                                <div className="border-t border-white/10 pt-3">
+                                                    <button
+                                                        onClick={() => toggleSection('actions')}
+                                                        className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                    >
+                                                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('actions') ? '-rotate-90' : ''}`} />
+                                                        <WrenchScrewdriverIcon className="w-4 h-4" />
+                                                        <span className="text-[10px] uppercase tracking-wider font-medium">Actions</span>
+                                                    </button>
+                                                    {!collapsedSections.has('actions') && (
+                                                    <div className="ml-5 mt-1 space-y-2">
                                                     {viewMode === '3d' && (
                                                         <button
                                                             onClick={() => updatePhysicsUndoable({ ...DEFAULT_PHYSICS })}
@@ -1867,7 +1921,7 @@ function LocalEditorContent() {
                                                             await graphActions.addNodesToCanvas(allNodeIds)
                                                         }}
                                                         disabled={astrolabeNodes.length === 0 || visibleNodes.length === astrolabeNodes.length}
-                                                        className="w-full py-1.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                        className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                                     >
                                                         Load All Nodes ({astrolabeNodes.length})
                                                     </button>
@@ -1887,6 +1941,8 @@ function LocalEditorContent() {
                                                     <p className="text-[10px] text-white/30 text-center">
                                                         Reset deletes all custom nodes, edges & metadata
                                                     </p>
+                                                    </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}
