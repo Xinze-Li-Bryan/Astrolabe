@@ -96,7 +96,7 @@ npm run dev:all    # Launch frontend + backend
 
 ## Maintainers
 
-Xinze Li, Alejandro Radisic
+[Xinze Li](https://lixinze.xyz/), [Alejandro Radisic](https://github.com/alerad)
 
 Want to contribute? Open an issue or reach out to us!
 
