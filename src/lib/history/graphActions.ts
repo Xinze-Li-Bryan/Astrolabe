@@ -212,6 +212,28 @@ export async function createCustomNodeUndoable(
 }
 
 /**
+ * Undoable update custom node (e.g., rename)
+ */
+export async function updateCustomNodeUndoable(
+  nodeId: string,
+  newName: string,
+  oldName: string
+): Promise<void> {
+  const store = getCanvasStore()
+
+  await undoable(
+    'canvas',
+    `Rename "${oldName}" → "${newName}"`,
+    async () => {
+      await store.updateCustomNode(nodeId, { name: newName })
+    },
+    async () => {
+      await store.updateCustomNode(nodeId, { name: oldName })
+    }
+  )
+}
+
+/**
  * Undoable delete custom node
  *
  * Note: This captures the node data for undo, but edge restoration
@@ -250,19 +272,31 @@ export async function deleteCustomNodeUndoable(
  *
  * The edge is created inside do() so redo works correctly.
  * Edge ID is stored in closure and updated on each redo.
+ * Returns same format as store.addCustomEdge for UI compatibility.
  */
 export async function createCustomEdgeUndoable(
   source: string,
   target: string,
   existingEdges: Array<{ source: string; target: string }>
-): Promise<string | null> {
+): Promise<{ edge: { id: string; source: string; target: string } | null; error?: string }> {
   const store = getCanvasStore()
   const sourceName = source.split('.').pop() || source
   const targetName = target.split('.').pop() || target
 
-  // Mutable closure to track the current edge ID
-  // Updated on initial create and each redo
-  let currentEdgeId: string | null = null
+  // First check if it would create a cycle (before recording undo)
+  // We do a dry-run check here to return error without polluting undo stack
+  const testResult = await store.addCustomEdge(source, target, existingEdges)
+  if (testResult.error) {
+    // Don't record in undo - just return the error
+    return { edge: null, error: testResult.error }
+  }
+  // Remove the test edge immediately
+  if (testResult.edge) {
+    await store.removeCustomEdge(testResult.edge.id)
+  }
+
+  // Mutable closure to track the current edge
+  let currentEdge: { id: string; source: string; target: string } | null = null
 
   const command = {
     id: `create-edge-${Date.now()}`,
@@ -272,12 +306,12 @@ export async function createCustomEdgeUndoable(
     do: async () => {
       const result = await store.addCustomEdge(source, target, existingEdges)
       if (result.edge) {
-        currentEdgeId = result.edge.id
+        currentEdge = { id: result.edge.id, source: result.edge.source, target: result.edge.target }
       }
     },
     undo: async () => {
-      if (currentEdgeId) {
-        await store.removeCustomEdge(currentEdgeId)
+      if (currentEdge) {
+        await store.removeCustomEdge(currentEdge.id)
       }
     },
   }
@@ -285,7 +319,7 @@ export async function createCustomEdgeUndoable(
   // Execute through history (this calls do() and records for undo)
   await history.execute(command)
 
-  return currentEdgeId
+  return { edge: currentEdge }
 }
 
 /**
@@ -315,6 +349,73 @@ export async function deleteCustomEdgeUndoable(
 }
 
 /**
+ * Undoable clear canvas
+ * Captures all visible nodes and positions for undo
+ */
+export async function clearCanvasUndoable(): Promise<void> {
+  const store = getCanvasStore()
+
+  // Capture current state for undo
+  const oldVisibleNodes = [...store.visibleNodes]
+  const oldPositions = { ...store.positions }
+
+  if (oldVisibleNodes.length === 0) return
+
+  await undoable(
+    'canvas',
+    `Clear canvas (${oldVisibleNodes.length} nodes)`,
+    async () => {
+      await store.clearCanvas()
+    },
+    async () => {
+      // Restore all nodes
+      await store.addNodes(oldVisibleNodes)
+      // Restore positions
+      await store.updatePositions(oldPositions)
+    }
+  )
+}
+
+/**
+ * Undoable delete node with meta
+ * Note: This is a destructive operation - undo will recreate the node but
+ * may not restore all meta perfectly for custom nodes with edges
+ */
+export async function deleteNodeWithMetaUndoable(
+  nodeId: string,
+  nodeName: string,
+  isCustomNode: boolean,
+  customNodeData?: { id: string; name: string; notes?: string; effect?: string; size?: number }
+): Promise<void> {
+  const store = getCanvasStore()
+
+  // Capture position for restore
+  const oldPosition = store.positions[nodeId]
+
+  await undoable(
+    'canvas',
+    `Delete node "${nodeName}"`,
+    async () => {
+      await store.deleteNodeWithMeta(nodeId)
+    },
+    async () => {
+      if (isCustomNode && customNodeData) {
+        // Recreate custom node
+        await store.addCustomNode(customNodeData.id, customNodeData.name)
+        // Note: edges are not restored - would need more complex tracking
+      } else {
+        // For non-custom nodes, just add back to canvas
+        await store.addNode(nodeId)
+      }
+      // Restore position
+      if (oldPosition) {
+        store.updatePosition(nodeId, oldPosition.x, oldPosition.y, oldPosition.z)
+      }
+    }
+  )
+}
+
+/**
  * Graph actions namespace for easy importing
  */
 export const graphActions = {
@@ -324,9 +425,12 @@ export const graphActions = {
   removeNodeFromCanvas: removeNodeFromCanvasUndoable,
   addNodesToCanvas: addNodesToCanvasUndoable,
   createCustomNode: createCustomNodeUndoable,
+  updateCustomNode: updateCustomNodeUndoable,
   deleteCustomNode: deleteCustomNodeUndoable,
   createCustomEdge: createCustomEdgeUndoable,
   deleteCustomEdge: deleteCustomEdgeUndoable,
+  clearCanvas: clearCanvasUndoable,
+  deleteNodeWithMeta: deleteNodeWithMetaUndoable,
 }
 
 export default graphActions

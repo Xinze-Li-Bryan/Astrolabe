@@ -10,6 +10,20 @@ import type { Lens } from './types'
 
 export const LENSES: Lens[] = [
   // ============================================
+  // Canvas Mode - Interactive exploration
+  // ============================================
+  {
+    id: 'canvas',
+    name: 'Canvas',
+    description: 'Interactive exploration: search, add nodes, expand neighbors',
+    icon: 'pencil-square',
+    requiresFocus: false,
+    layout: 'force',
+    filterId: null,
+    aggregateId: null,
+  },
+
+  // ============================================
   // Full Graph - Show everything
   // ============================================
   {
@@ -97,7 +111,7 @@ export const LENSES: Lens[] = [
 export const LENSES_BY_ID = new Map(LENSES.map(lens => [lens.id, lens]))
 
 // Get the default lens ID
-export const DEFAULT_LENS_ID = 'full'
+export const DEFAULT_LENS_ID = 'canvas'
 
 /**
  * Get recommended lens based on node count
@@ -125,10 +139,11 @@ export function getRecommendedLens(nodeCount: number): Lens {
  * Check if a lens is available (all required features implemented)
  */
 export function isLensAvailable(lensId: string): boolean {
+  // 'canvas' - Interactive exploration mode
   // Phase 1: 'full' lens
   // Phase 2: 'ego' lens (nHop filter implemented)
   // Phase 3: 'namespaces' lens (byNamespace aggregator implemented)
   // Phase 4: 'imports'/'dependents' lenses (ancestors/descendants filters implemented)
-  const available = ['full', 'ego', 'namespaces', 'imports', 'dependents']
+  const available = ['canvas', 'full', 'ego', 'namespaces', 'imports', 'dependents']
   return available.includes(lensId)
 }

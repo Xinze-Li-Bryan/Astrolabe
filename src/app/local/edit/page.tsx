@@ -181,6 +181,7 @@ function LocalEditorContent() {
 
 
     // Canvas store - manages on-demand added nodes
+    // Note: Most mutation operations use graphActions for undo support
     const {
         visibleNodes,
         customNodes,
@@ -189,17 +190,7 @@ function LocalEditorContent() {
         searchResults,
         setProjectPath: setCanvasProjectPath,
         loadCanvas,
-        addNode: addCanvasNode,
-        addNodes: addCanvasNodes,
-        removeNode: removeCanvasNode,
-        clearCanvas,
         resetAllData,
-        addCustomNode,
-        updateCustomNode,
-        removeCustomNode,
-        addCustomEdge,
-        removeCustomEdge,
-        deleteNodeWithMeta,
     } = useCanvasStore()
 
     // Custom node creation dialog state
@@ -395,7 +386,7 @@ function LocalEditorContent() {
         try {
             // Pass all Lean edges to check for cycles
             const leanEdges = astrolabeEdges.map(e => ({ source: e.source, target: e.target }))
-            const result = await addCustomEdge(source, target, leanEdges)
+            const result = await graphActions.createCustomEdge(source, target, leanEdges)
 
             if (result.error) {
                 // Show error alert for cycle detection
@@ -409,7 +400,7 @@ function LocalEditorContent() {
         }
 
         setIsAddingEdge(false)
-    }, [selectedNode, isAddingEdge, addingEdgeDirection, addCustomEdge, astrolabeEdges])
+    }, [selectedNode, isAddingEdge, addingEdgeDirection, astrolabeEdges])
 
     // Cancel adding edge mode
     const cancelAddingEdge = useCallback(() => {
@@ -424,12 +415,12 @@ function LocalEditorContent() {
         }
         const newName = editingCustomNodeNameValue.trim()
         if (newName !== selectedNode.name) {
-            await updateCustomNode(selectedNode.id, { name: newName })
+            await graphActions.updateCustomNode(selectedNode.id, newName, selectedNode.name)
             // Update selectedNode display
             setSelectedNodeState(prev => prev ? { ...prev, name: newName } : null)
         }
         setIsEditingCustomNodeName(false)
-    }, [selectedNode, editingCustomNodeNameValue, updateCustomNode])
+    }, [selectedNode, editingCustomNodeNameValue])
 
     // When selected node is added to canvas, automatically focus on it
     const prevVisibleNodesRef = useRef<string[]>([])
@@ -855,12 +846,11 @@ function LocalEditorContent() {
     }
 
     const canvasNodes: Node[] = useMemo(() => {
-        // When any lens is active, show all nodes (lens system handles visibility via aggregation)
-        // Canvas visibility (visibleNodes) is only used when no lens is active
-        // This ensures namespace bubbles can be created from all nodes, not just canvas-visible ones
-        const hasActiveLens = activeLensId && activeLensId !== 'none'
+        // Canvas mode: only show visibleNodes (interactive exploration)
+        // Other lenses: show all nodes (lens system handles visibility via filtering/aggregation)
+        const isCanvasMode = !activeLensId || activeLensId === 'canvas'
         return astrolabeNodes
-            .filter(node => hasActiveLens || visibleNodes.includes(node.id))
+            .filter(node => !isCanvasMode || visibleNodes.includes(node.id))
             .map(node => ({
                 id: node.id,
                 name: node.name,
@@ -1019,7 +1009,7 @@ function LocalEditorContent() {
 
         // If in delete node mode, directly delete the node
         if (isRemovingNodes) {
-            removeCanvasNode(node.id)
+            graphActions.removeNodeFromCanvas(node.id)
             // If deleting the currently selected node, clear selection state
             if (selectedNode?.id === node.id) {
                 setSelectedNode(null)
@@ -1055,7 +1045,7 @@ function LocalEditorContent() {
         if (graphNode) {
             selectNode(graphNode)
         }
-    }, [graphNodes, customNodes, selectNode, setSelectedNode, isAddingEdge, selectedNode, handleAddCustomEdge, cancelAddingEdge, isRemovingNodes, removeCanvasNode])
+    }, [graphNodes, customNodes, selectNode, setSelectedNode, isAddingEdge, selectedNode, handleAddCustomEdge, cancelAddingEdge, isRemovingNodes])
 
     // Show clear canvas dialog
     const handleClearCanvas = useCallback(() => {
@@ -1089,21 +1079,21 @@ function LocalEditorContent() {
     // Remove selected nodes
     const removeSelectedNodes = useCallback(async () => {
         for (const nodeId of selectedNodesToRemove) {
-            await removeCanvasNode(nodeId)
+            await graphActions.removeNodeFromCanvas(nodeId)
         }
         setSelectedNodesToRemove(new Set())
         setSelectedNode(null)
         if (selectedNodesToRemove.size === canvasNodes.length) {
             setShowClearCanvasDialog(false)
         }
-    }, [selectedNodesToRemove, removeCanvasNode, setSelectedNode, canvasNodes.length])
+    }, [selectedNodesToRemove, setSelectedNode, canvasNodes.length])
 
     // Clear all nodes
-    const clearAllNodes = useCallback(() => {
-        clearCanvas()
+    const clearAllNodes = useCallback(async () => {
+        await graphActions.clearCanvas()
         setSelectedNode(null)
         setShowClearCanvasDialog(false)
-    }, [clearCanvas, setSelectedNode])
+    }, [setSelectedNode])
 
     // Show reset confirmation dialog
     const handleResetAllData = useCallback(() => {
@@ -1126,14 +1116,12 @@ function LocalEditorContent() {
 
         // Generate ID (using timestamp to ensure uniqueness)
         const id = `custom-${Date.now()}`
-        const node = await addCustomNode(id, name)
+        await graphActions.createCustomNode(id, name)
 
-        if (node) {
-            setShowCustomNodeDialog(false)
-            setCustomNodeName('')
-            console.log('[page] Created custom node:', node)
-        }
-    }, [customNodeName, addCustomNode])
+        setShowCustomNodeDialog(false)
+        setCustomNodeName('')
+        console.log('[page] Created custom node:', id, name)
+    }, [customNodeName])
 
     // Handle search result selection - find the corresponding GraphNode and select it
     const handleSearchResultSelect = useCallback((result: SearchResult) => {
@@ -1831,6 +1819,17 @@ function LocalEditorContent() {
                                                         </button>
                                                     )}
                                                     <button
+                                                        onClick={async () => {
+                                                            // Load all nodes from graph into canvas
+                                                            const allNodeIds = astrolabeNodes.map(n => n.id)
+                                                            await graphActions.addNodesToCanvas(allNodeIds)
+                                                        }}
+                                                        disabled={astrolabeNodes.length === 0 || visibleNodes.length === astrolabeNodes.length}
+                                                        className="w-full py-1.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    >
+                                                        Load All Nodes ({astrolabeNodes.length})
+                                                    </button>
+                                                    <button
                                                         onClick={handleClearCanvas}
                                                         disabled={canvasNodes.length === 0}
                                                         className="w-full py-1.5 text-xs bg-white/10 hover:bg-white/20 text-white/80 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -2103,9 +2102,9 @@ function LocalEditorContent() {
                                                         onClick={async () => {
                                                             const isVisible = visibleNodes.includes(selectedNode.id)
                                                             if (isVisible) {
-                                                                await removeCanvasNode(selectedNode.id)
+                                                                await graphActions.removeNodeFromCanvas(selectedNode.id)
                                                             } else {
-                                                                await addCanvasNode(selectedNode.id)
+                                                                await graphActions.addNodeToCanvas(selectedNode.id)
                                                             }
                                                         }}
                                                         className={`p-0.5 rounded transition-all flex-shrink-0 ${
@@ -2181,7 +2180,14 @@ function LocalEditorContent() {
                                                         <button
                                                             onClick={async () => {
                                                                 if (confirm('Delete this node? This will remove it from canvas and clear its meta info.')) {
-                                                                    await deleteNodeWithMeta(selectedNode.id)
+                                                                    const isCustom = selectedNode.type === 'custom'
+                                                                    const customData = isCustom ? customNodes.find(n => n.id === selectedNode.id) : undefined
+                                                                    await graphActions.deleteNodeWithMeta(
+                                                                        selectedNode.id,
+                                                                        selectedNode.name,
+                                                                        isCustom,
+                                                                        customData
+                                                                    )
                                                                     setSelectedNode(null)
                                                                 }
                                                             }}
@@ -2355,7 +2361,11 @@ function LocalEditorContent() {
                                                                                 {/* Delete button for custom edges */}
                                                                                 {isCustom && (
                                                                                     <button
-                                                                                        onClick={(e) => { e.stopPropagation(); removeCustomEdge(edge.id) }}
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation()
+                                                                                            const leanEdges = astrolabeEdges.map(e => ({ source: e.source, target: e.target }))
+                                                                                            graphActions.deleteCustomEdge(edge.id, edge.source, edge.target, leanEdges)
+                                                                                        }}
                                                                                         className="text-red-400/40 hover:text-red-400 transition-colors"
                                                                                     >
                                                                                         <XMarkIcon className="w-3 h-3" />
@@ -2551,9 +2561,9 @@ function LocalEditorContent() {
                                                                                         <button
                                                                                             onClick={async () => {
                                                                                                 if (node.isOnCanvas) {
-                                                                                                    await removeCanvasNode(node.id)
+                                                                                                    await graphActions.removeNodeFromCanvas(node.id)
                                                                                                 } else {
-                                                                                                    await addCanvasNode(node.id)
+                                                                                                    await graphActions.addNodeToCanvas(node.id)
                                                                                                 }
                                                                                             }}
                                                                                             className={`w-4 h-4 flex items-center justify-center rounded transition-colors ${
@@ -2606,12 +2616,12 @@ function LocalEditorContent() {
                                                                                     // Close all (except custom nodes)
                                                                                     for (const node of neighborsList) {
                                                                                         if (node.isOnCanvas && !customNodeIds.has(node.id)) {
-                                                                                            await removeCanvasNode(node.id)
+                                                                                            await graphActions.removeNodeFromCanvas(node.id)
                                                                                         }
                                                                                     }
                                                                                 } else {
                                                                                     // Open all closed
-                                                                                    await addCanvasNodes(closedNeighbors.map(n => n.id))
+                                                                                    await graphActions.addNodesToCanvas(closedNeighbors.map(n => n.id))
                                                                                 }
                                                                             }}
                                                                             className={`w-full py-1.5 text-xs rounded transition-colors ${

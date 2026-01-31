@@ -49,8 +49,8 @@ describe('Lens Presets', () => {
       expect(LENSES_BY_ID.has(DEFAULT_LENS_ID)).toBe(true)
     })
 
-    it('should be "full"', () => {
-      expect(DEFAULT_LENS_ID).toBe('full')
+    it('should be "canvas" (interactive exploration mode)', () => {
+      expect(DEFAULT_LENS_ID).toBe('canvas')
     })
   })
 
