@@ -122,6 +122,13 @@ export interface PhysicsParams {
   adaptiveSpringEnabled: boolean
   adaptiveSpringMode: 'sqrt' | 'logarithmic' | 'linear'
   adaptiveSpringScale: number
+  // Community-aware layout
+  communityAwareLayout: boolean
+  communitySameMultiplier: number
+  communityCrossMultiplier: number
+  // Community clustering (direct forces)
+  communityClusteringStrength: number
+  communitySeparation: number
 }
 
 /**

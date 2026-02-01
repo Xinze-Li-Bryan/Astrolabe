@@ -74,6 +74,7 @@ interface ForceGraph3DProps {
   isRemovingNodes?: boolean  // Remove mode
   nodesWithHiddenNeighbors?: Set<string>  // Nodes that have hidden dependencies/dependents
   getPositionsRef?: React.MutableRefObject<(() => Map<string, [number, number, number]>) | null>  // Ref to get current positions
+  nodeCommunities?: Map<string, number> | null  // Node community assignments for community-aware layout
 }
 
 // Camera focus control
@@ -482,6 +483,7 @@ function GraphScene({
   activeLensId = 'full',
   lensFocusNodeId = null,
   onNodeContextMenu,
+  nodeCommunities,
 }: {
   nodes: Node[]
   edges: Edge[]
@@ -511,6 +513,7 @@ function GraphScene({
   activeLensId?: string
   lensFocusNodeId?: string | null
   onNodeContextMenu?: (node: Node, clientX: number, clientY: number) => void
+  nodeCommunities?: Map<string, number> | null
 }) {
   // Handler for node selection
   // Bubble left-click: just select/focus (don't expand - use right-click context menu for that)
@@ -704,6 +707,7 @@ function GraphScene({
           onStable={onStable}
           onWarmupComplete={onWarmupComplete}
           controlsRef={controlsRef}
+          nodeCommunities={nodeCommunities}
         />
       )}
 
@@ -868,6 +872,7 @@ export function ForceGraph3D({
   isRemovingNodes = false,
   nodesWithHiddenNeighbors,
   getPositionsRef,
+  nodeCommunities,
 }: ForceGraph3DProps) {
   const positionsRef = useRef<Map<string, [number, number, number]>>(new Map())
 
@@ -1262,6 +1267,7 @@ export function ForceGraph3D({
           activeLensId={activeLensId}
           lensFocusNodeId={lensFocusNodeId}
           onNodeContextMenu={handleNodeContextMenu}
+          nodeCommunities={nodeCommunities}
         />
       </Canvas>
 

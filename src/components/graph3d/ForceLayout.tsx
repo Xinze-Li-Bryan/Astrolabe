@@ -53,6 +53,13 @@ export interface PhysicsParams {
   adaptiveSpringEnabled: boolean    // Enable density-adaptive spring length (default false)
   adaptiveSpringMode: AdaptiveSpringMode  // 'linear' | 'logarithmic' | 'sqrt' (default 'sqrt')
   adaptiveSpringScale: number       // Scale factor for degree-based adjustment (default 0.3)
+  // Community-aware layout
+  communityAwareLayout: boolean     // Adjust edge lengths based on community (default false)
+  communitySameMultiplier: number   // Edge length multiplier for same community (default 0.5)
+  communityCrossMultiplier: number  // Edge length multiplier for cross community (default 2.0)
+  // Community clustering (direct forces, like namespace clustering)
+  communityClusteringStrength: number  // Force pulling nodes toward community centroid (default 0.3)
+  communitySeparation: number          // Force pushing different communities apart (default 0.5)
 }
 
 // Default physics parameters
@@ -71,6 +78,13 @@ export const DEFAULT_PHYSICS: PhysicsParams = {
   adaptiveSpringEnabled: true,
   adaptiveSpringMode: 'sqrt',
   adaptiveSpringScale: 0.5,
+  // Community-aware layout defaults
+  communityAwareLayout: false,
+  communitySameMultiplier: 0.3,
+  communityCrossMultiplier: 3.5,
+  // Community clustering (direct forces)
+  communityClusteringStrength: 0.3,
+  communitySeparation: 0.5,
 }
 
 interface ForceLayoutProps {
@@ -89,6 +103,8 @@ interface ForceLayoutProps {
   onWarmupComplete?: () => void
   /** OrbitControls ref for camera centering after warmup */
   controlsRef?: React.RefObject<any>
+  /** Node community assignments for community-aware layout */
+  nodeCommunities?: Map<string, number> | null
 }
 
 /**
@@ -103,7 +119,8 @@ function simulateStep(
   physics: PhysicsParams,
   dt: number = 0.016,
   namespaceGroups?: NamespaceGroups | null,
-  nodeDegrees?: Map<string, NodeDegree> | null
+  nodeDegrees?: Map<string, NodeDegree> | null,
+  nodeCommunities?: Map<string, number> | null
 ): number {
   if (positions.size === 0) return 0
 
@@ -163,6 +180,21 @@ function simulateStep(
           minLength: baseSpringLength * 0.5,
           maxLength: baseSpringLength * 5,
         })
+      }
+    }
+
+    // Apply community-aware layout adjustment
+    if (physics.communityAwareLayout && nodeCommunities) {
+      const comm1 = nodeCommunities.get(edge.source)
+      const comm2 = nodeCommunities.get(edge.target)
+      if (comm1 !== undefined && comm2 !== undefined) {
+        if (comm1 === comm2) {
+          // Same community: shorter edges (pull together)
+          springLength *= physics.communitySameMultiplier
+        } else {
+          // Different communities: longer edges (push apart)
+          springLength *= physics.communityCrossMultiplier
+        }
       }
     }
 
@@ -339,7 +371,8 @@ function warmupSimulation(
   maxIterations: number = 500,
   stabilityThreshold: number = 0.01,
   targetRadius: number = 12,
-  allowScaleUp: boolean = false
+  allowScaleUp: boolean = false,
+  nodeCommunities?: Map<string, number> | null
 ): void {
   const velocities = new Map<string, [number, number, number]>()
   nodes.forEach((node) => velocities.set(node.id, [0, 0, 0]))
@@ -361,7 +394,7 @@ function warmupSimulation(
 
   let stableCount = 0
   for (let i = 0; i < maxIterations; i++) {
-    const movement = simulateStep(nodes, edges, positions, velocities, physics, 0.016, namespaceGroups, nodeDegrees)
+    const movement = simulateStep(nodes, edges, positions, velocities, physics, 0.016, namespaceGroups, nodeDegrees, nodeCommunities)
     if (movement < stabilityThreshold) {
       stableCount++
       if (stableCount > 10) break // Stop after 10 consecutive stable frames
@@ -386,6 +419,7 @@ export function ForceLayout({
   onStable,
   onWarmupComplete,
   controlsRef,
+  nodeCommunities,
 }: ForceLayoutProps) {
   // Access positionsRef.current directly in callbacks to always get latest Map
   const velocities = useRef<Map<string, [number, number, number]>>(new Map())
@@ -416,6 +450,30 @@ export function ForceLayout({
     const astrolabeEdges = edges.map(e => ({ ...e }))
     return calculateNodeDegrees(astrolabeNodes as any, astrolabeEdges as any)
   }, [nodes, edges, physics.adaptiveSpringEnabled])
+
+  // Track previous community layout state to detect changes
+  const prevCommunityLayoutRef = useRef(physics.communityAwareLayout)
+
+  // When community-aware layout is toggled, give nodes a velocity boost
+  useEffect(() => {
+    if (physics.communityAwareLayout !== prevCommunityLayoutRef.current) {
+      prevCommunityLayoutRef.current = physics.communityAwareLayout
+      console.log(`[ForceLayout] Community-aware layout ${physics.communityAwareLayout ? 'enabled' : 'disabled'}, boosting velocities`)
+
+      // Give all nodes a random velocity boost to kick-start the re-layout
+      const vels = velocities.current
+      for (const [_nodeId, vel] of vels) {
+        // Add random velocity in range [-2, 2] for each axis
+        vel[0] += (Math.random() - 0.5) * 4
+        vel[1] += (Math.random() - 0.5) * 4
+        vel[2] += (Math.random() - 0.5) * 4
+      }
+
+      // Reset stable frames to allow simulation to run
+      stableFrames.current = 0
+      hasTriggeredStable.current = false
+    }
+  }, [physics.communityAwareLayout])
 
   const runWarmupIfNeeded = useCallback((source: string) => {
     const positions = positionsRef.current
@@ -491,48 +549,97 @@ export function ForceLayout({
     // For very large graphs, skip synchronous warmup entirely to avoid freezing
     const skipWarmup = edgeCount > 1000 || currentCount > 500
 
-    if (savedRatio > 0.5 && !looksDense) {
-      console.log(`[ForceLayout] ${Math.round(savedRatio * 100)}% nodes have saved positions, skipping physics warmup`)
-      centerAndScale(positions, targetRadius, allowScaleUp)
-    } else if (skipWarmup) {
-      // Large graph: just pre-spread and let runtime physics handle it
-      const spreadRadius = targetRadius * 1.2
-      console.log(`[ForceLayout] Large graph (${currentCount} nodes, ${edgeCount} edges) - pre-spreading only, skipping warmup...`)
-      let i = 0
-      for (const [id] of positions.entries()) {
-        // Fibonacci sphere distribution for even spread
-        const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-        const theta = i * goldenAngle
-        const phi = Math.acos(1 - 2 * (i + 0.5) / currentCount)
-        const r = spreadRadius * (0.3 + 0.7 * Math.cbrt((i + 1) / currentCount))
-        positions.set(id, [
-          r * Math.sin(phi) * Math.cos(theta),
-          r * Math.sin(phi) * Math.sin(theta),
-          r * Math.cos(phi),
-        ])
-        i++
+    // Helper: check if a position is "bad" (at origin or very clustered)
+    const isPositionBad = (pos: [number, number, number]): boolean => {
+      const dist = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2])
+      return dist < 1 // Position is at/near origin
+    }
+
+    // Count how many positions are already well-distributed (not at origin)
+    let goodPositionCount = 0
+    for (const pos of positions.values()) {
+      if (!isPositionBad(pos)) {
+        goodPositionCount++
       }
-    } else {
-      // Small graph: can do synchronous warmup
-      if (savedRatio < 0.2 && currentCount > 100) {
-        const spreadRadius = targetRadius * 1.5
-        console.log(`[ForceLayout] Pre-spreading ${currentCount} nodes to radius ${spreadRadius}...`)
-        let i = 0
-        for (const [id] of positions.entries()) {
+    }
+    const goodRatio = goodPositionCount / currentCount
+
+    if (savedRatio > 0.5) {
+      console.log(`[ForceLayout] ${Math.round(savedRatio * 100)}% nodes have saved positions, skipping warmup`)
+      // Don't run warmup - preserve user's saved layout
+      hasWarmedUp.current = true
+      lastNodeCount.current = currentCount
+      if (!hasReportedWarmup.current) {
+        hasReportedWarmup.current = true
+        onWarmupComplete?.()
+      }
+      return
+    } else if (goodRatio > 0.7) {
+      // Most nodes already have good positions (from nodeLifecycle), skip warmup entirely
+      // This preserves spawn positions near parent nodes
+      console.log(`[ForceLayout] ${Math.round(goodRatio * 100)}% nodes have good positions, skipping warmup`)
+      hasWarmedUp.current = true
+      lastNodeCount.current = currentCount
+      if (!hasReportedWarmup.current) {
+        hasReportedWarmup.current = true
+        onWarmupComplete?.()
+      }
+      return
+    } else if (skipWarmup) {
+      // Large graph: pre-spread ONLY nodes with bad positions
+      const spreadRadius = targetRadius * 1.2
+      const badPositionIds: string[] = []
+      for (const [id, pos] of positions.entries()) {
+        if (isPositionBad(pos)) {
+          badPositionIds.push(id)
+        }
+      }
+
+      if (badPositionIds.length > 0) {
+        console.log(`[ForceLayout] Large graph - pre-spreading ${badPositionIds.length}/${currentCount} nodes with bad positions...`)
+        badPositionIds.forEach((id, i) => {
           const goldenAngle = Math.PI * (3 - Math.sqrt(5))
           const theta = i * goldenAngle
-          const phi = Math.acos(1 - 2 * (i + 0.5) / currentCount)
-          const r = spreadRadius * (0.5 + 0.5 * Math.cbrt((i + 1) / currentCount))
+          const phi = Math.acos(1 - 2 * (i + 0.5) / badPositionIds.length)
+          const r = spreadRadius * (0.3 + 0.7 * Math.cbrt((i + 1) / badPositionIds.length))
           positions.set(id, [
             r * Math.sin(phi) * Math.cos(theta),
             r * Math.sin(phi) * Math.sin(theta),
             r * Math.cos(phi),
           ])
-          i++
+        })
+      } else {
+        console.log(`[ForceLayout] Large graph - all ${currentCount} nodes have good positions, preserving them`)
+      }
+    } else {
+      // Small graph: can do synchronous warmup
+      // Only pre-spread if many nodes have bad positions
+      if (goodRatio < 0.5 && currentCount > 100) {
+        const spreadRadius = targetRadius * 1.5
+        const badPositionIds: string[] = []
+        for (const [id, pos] of positions.entries()) {
+          if (isPositionBad(pos)) {
+            badPositionIds.push(id)
+          }
+        }
+
+        if (badPositionIds.length > 0) {
+          console.log(`[ForceLayout] Pre-spreading ${badPositionIds.length}/${currentCount} nodes with bad positions...`)
+          badPositionIds.forEach((id, i) => {
+            const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+            const theta = i * goldenAngle
+            const phi = Math.acos(1 - 2 * (i + 0.5) / badPositionIds.length)
+            const r = spreadRadius * (0.5 + 0.5 * Math.cbrt((i + 1) / badPositionIds.length))
+            positions.set(id, [
+              r * Math.sin(phi) * Math.cos(theta),
+              r * Math.sin(phi) * Math.sin(theta),
+              r * Math.cos(phi),
+            ])
+          })
         }
       }
-      console.log(`[ForceLayout] Warming up with ${positions.size} nodes (${Math.round(savedRatio * 100)}% have saved positions)...`)
-      warmupSimulation(nodes, edges, positions, physics, warmupIterations, stabilityThreshold, targetRadius, allowScaleUp)
+      console.log(`[ForceLayout] Warming up with ${positions.size} nodes (${Math.round(goodRatio * 100)}% have good positions)...`)
+      warmupSimulation(nodes, edges, positions, physics, warmupIterations, stabilityThreshold, targetRadius, allowScaleUp, nodeCommunities)
     }
 
     // Pre-bake layout: mark stable and save once before first render
@@ -549,7 +656,7 @@ export function ForceLayout({
     hasWarmedUp.current = true
     lastNodeCount.current = currentCount
     console.log('[ForceLayout] Initialization complete')
-  }, [nodes, edges, physics, savedPositionCount, onStable, onWarmupComplete])
+  }, [nodes, edges, physics, savedPositionCount, onStable, onWarmupComplete, nodeCommunities])
 
   // Warmup: Calculate stable positions before first render
   useEffect(() => {
@@ -720,6 +827,21 @@ export function ForceLayout({
         }
       }
 
+      // Apply community-aware layout adjustment
+      if (physics.communityAwareLayout && nodeCommunities) {
+        const comm1 = nodeCommunities.get(edge.source)
+        const comm2 = nodeCommunities.get(edge.target)
+        if (comm1 !== undefined && comm2 !== undefined) {
+          if (comm1 === comm2) {
+            // Same community: shorter edges (pull together)
+            springLength *= physics.communitySameMultiplier
+          } else {
+            // Different communities: longer edges (push apart)
+            springLength *= physics.communityCrossMultiplier
+          }
+        }
+      }
+
       const displacement = dist - springLength
       const force = springStrength * displacement
 
@@ -765,7 +887,10 @@ export function ForceLayout({
     })
 
     if (bubbleIds.length > 1) {
-      const bubbleRepulsionStrength = physics.repulsionStrength * 2 // Stronger repulsion for bubbles
+      // Much stronger repulsion for bubbles - they need to spread out
+      const bubbleRepulsionStrength = physics.repulsionStrength * 5
+      const minBubbleDist = 8 // Minimum distance to avoid division issues
+
       for (let i = 0; i < bubbleIds.length; i++) {
         for (let j = i + 1; j < bubbleIds.length; j++) {
           const pos1 = positions.get(bubbleIds[i])
@@ -777,26 +902,23 @@ export function ForceLayout({
           const dz = pos2[2] - pos1[2]
           const distSq = dx * dx + dy * dy + dz * dz
           const dist = Math.sqrt(distSq) || 0.1
-          const minDist = 15 // Bubbles should stay at least this far apart
 
-          if (dist < minDist * 3) {
-            // Apply repulsion force
-            const effectiveDist = Math.max(dist, 1)
-            const force = bubbleRepulsionStrength / (effectiveDist * effectiveDist)
+          // Always apply repulsion (no distance threshold)
+          const effectiveDist = Math.max(dist, minBubbleDist)
+          const force = bubbleRepulsionStrength / (effectiveDist * effectiveDist)
 
-            const fx = (dx / dist) * force
-            const fy = (dy / dist) * force
-            const fz = (dz / dist) * force
+          const fx = (dx / dist) * force
+          const fy = (dy / dist) * force
+          const fz = (dz / dist) * force
 
-            // Ensure forces exist for bubbles
-            if (!forces.has(bubbleIds[i])) forces.set(bubbleIds[i], [0, 0, 0])
-            if (!forces.has(bubbleIds[j])) forces.set(bubbleIds[j], [0, 0, 0])
+          // Ensure forces exist for bubbles
+          if (!forces.has(bubbleIds[i])) forces.set(bubbleIds[i], [0, 0, 0])
+          if (!forces.has(bubbleIds[j])) forces.set(bubbleIds[j], [0, 0, 0])
 
-            const f1 = forces.get(bubbleIds[i])!
-            const f2 = forces.get(bubbleIds[j])!
-            f1[0] -= fx; f1[1] -= fy; f1[2] -= fz
-            f2[0] += fx; f2[1] += fy; f2[2] += fz
-          }
+          const f1 = forces.get(bubbleIds[i])!
+          const f2 = forces.get(bubbleIds[j])!
+          f1[0] -= fx; f1[1] -= fy; f1[2] -= fz
+          f2[0] += fx; f2[1] += fy; f2[2] += fz
         }
       }
     }
@@ -850,6 +972,85 @@ export function ForceLayout({
       }
     }
 
+    // Community clustering force (direct forces like namespace clustering)
+    if (physics.communityAwareLayout && nodeCommunities && nodeCommunities.size > 0) {
+      // Group nodes by community ID
+      const communityGroups = new Map<number, string[]>()
+      for (const [nodeId, communityId] of nodeCommunities.entries()) {
+        if (!communityGroups.has(communityId)) {
+          communityGroups.set(communityId, [])
+        }
+        communityGroups.get(communityId)!.push(nodeId)
+      }
+
+      // Compute community centroids
+      const communityCentroids = new Map<number, Vec3>()
+      for (const [communityId, nodeIds] of communityGroups.entries()) {
+        let cx = 0, cy = 0, cz = 0
+        let count = 0
+        for (const nodeId of nodeIds) {
+          const pos = positions.get(nodeId)
+          if (pos) {
+            cx += pos[0]
+            cy += pos[1]
+            cz += pos[2]
+            count++
+          }
+        }
+        if (count > 0) {
+          communityCentroids.set(communityId, {
+            x: cx / count,
+            y: cy / count,
+            z: cz / count,
+          })
+        }
+      }
+
+      // Apply community clustering force to each node
+      for (const [communityId, nodeIds] of communityGroups.entries()) {
+        const centroid = communityCentroids.get(communityId)
+        if (!centroid) continue
+
+        for (const nodeId of nodeIds) {
+          const pos = positions.get(nodeId)
+          const f = forces.get(nodeId)
+          if (!pos || !f) continue
+
+          const nodePos: Vec3 = { x: pos[0], y: pos[1], z: pos[2] }
+
+          // Attraction to own community centroid
+          const clusterForce = calculateClusterForce(
+            nodePos,
+            centroid,
+            physics.communityClusteringStrength
+          )
+          f[0] += clusterForce.x
+          f[1] += clusterForce.y
+          f[2] += clusterForce.z
+
+          // Repulsion from other community centroids
+          if ((physics.communitySeparation ?? 0) > 0) {
+            for (const [otherCommunityId, otherCentroid] of communityCentroids.entries()) {
+              if (otherCommunityId === communityId) continue
+
+              // Calculate repulsion force from other community centroid
+              const dx = nodePos.x - otherCentroid.x
+              const dy = nodePos.y - otherCentroid.y
+              const dz = nodePos.z - otherCentroid.z
+              const distSq = dx * dx + dy * dy + dz * dz
+              const dist = Math.sqrt(distSq) || 0.1
+
+              // Inverse distance force (similar to inter-cluster repulsion)
+              const force = physics.communitySeparation / (dist * 0.5 + 1)
+              f[0] += (dx / dist) * force
+              f[1] += (dy / dist) * force
+              f[2] += (dz / dist) * force
+            }
+          }
+        }
+      }
+    }
+
     // Apply forces (Verlet integration)
     const damping = physics.damping
     const maxVelocity = 10
@@ -884,6 +1085,14 @@ export function ForceLayout({
         pos[1] + vel[1] * dt,
         pos[2] + vel[2] * dt,
       ]
+
+      // Guard against NaN - reset to origin if position becomes invalid
+      if (Number.isNaN(newPos[0]) || Number.isNaN(newPos[1]) || Number.isNaN(newPos[2])) {
+        newPositions.set(node.id, [0, 0, 0])
+        velocities.current.set(node.id, [0, 0, 0])
+        return
+      }
+
       newPositions.set(node.id, newPos)
 
       totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])
@@ -918,6 +1127,14 @@ export function ForceLayout({
         pos[1] + vel[1] * dt,
         pos[2] + vel[2] * dt,
       ]
+
+      // Guard against NaN - reset to origin if position becomes invalid
+      if (Number.isNaN(newPos[0]) || Number.isNaN(newPos[1]) || Number.isNaN(newPos[2])) {
+        newPositions.set(bubbleId, [0, 0, 0])
+        velocities.current.set(bubbleId, [0, 0, 0])
+        return
+      }
+
       newPositions.set(bubbleId, newPos)
 
       totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])

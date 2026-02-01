@@ -28,6 +28,7 @@ import {
     CubeTransparentIcon,
     BoltIcon,
     WrenchScrewdriverIcon,
+    ChartBarIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
 import { getNamespaceDepthPreview, groupNodesByNamespace } from '@/lib/graphProcessing'
@@ -237,6 +238,41 @@ function LocalEditorContent() {
             return next
         })
     }, [])
+
+    // Analysis panel state
+    const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree'>('default')
+    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community'>('kind')
+    const [analysisData, setAnalysisData] = useState<{
+        pagerank?: Record<string, number>
+        indegree?: Record<string, number>
+        communities?: Record<string, number>
+        communityCount?: number
+        modularity?: number
+        nodeCount?: number
+        edgeCount?: number
+        density?: number
+    }>({})
+    const [analysisLoading, setAnalysisLoading] = useState(false)
+
+    // Community color palette (10 distinct colors)
+    const COMMUNITY_COLORS = useMemo(() => [
+        '#ef4444', // red
+        '#f97316', // orange
+        '#eab308', // yellow
+        '#22c55e', // green
+        '#14b8a6', // teal
+        '#3b82f6', // blue
+        '#8b5cf6', // violet
+        '#ec4899', // pink
+        '#6366f1', // indigo
+        '#06b6d4', // cyan
+    ], [])
+
+    // Convert communities object to Map for ForceLayout
+    const nodeCommunities = useMemo(() => {
+        if (!analysisData.communities) return null
+        return new Map(Object.entries(analysisData.communities))
+    }, [analysisData.communities])
 
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
@@ -907,6 +943,43 @@ function LocalEditorContent() {
         // Canvas mode: only show visibleNodes (interactive exploration)
         // Other lenses: show all nodes (lens system handles visibility via filtering/aggregation)
         const isCanvasMode = !activeLensId || activeLensId === 'canvas'
+
+        // Calculate size based on analysis mode
+        const getNodeSize = (nodeId: string, metaSize?: number): number | undefined => {
+            if (sizeMappingMode === 'pagerank' && analysisData.pagerank) {
+                const pr = analysisData.pagerank[nodeId]
+                if (pr !== undefined) {
+                    // Scale PageRank to size: use pow(0.4) for more dramatic scaling
+                    // Map to size range 0.3 to 5.0 for more visible differences
+                    const maxPR = Math.max(...Object.values(analysisData.pagerank))
+                    const minPR = Math.min(...Object.values(analysisData.pagerank))
+                    const normalized = maxPR > minPR ? (pr - minPR) / (maxPR - minPR) : 0.5
+                    return 0.3 + Math.pow(normalized, 0.4) * 4.7
+                }
+            }
+            if (sizeMappingMode === 'indegree' && analysisData.indegree) {
+                const deg = analysisData.indegree[nodeId]
+                if (deg !== undefined) {
+                    // Scale in-degree to size using pow(0.4) for more dramatic scaling
+                    const maxDeg = Math.max(...Object.values(analysisData.indegree))
+                    const normalized = maxDeg > 0 ? deg / maxDeg : 0
+                    return 0.3 + Math.pow(normalized, 0.4) * 4.7
+                }
+            }
+            return metaSize // Use original meta size (undefined means use default)
+        }
+
+        // Calculate color based on community mapping
+        const getNodeColor = (nodeId: string, defaultColor: string): string => {
+            if (colorMappingMode === 'community' && analysisData.communities) {
+                const communityId = analysisData.communities[nodeId]
+                if (communityId !== undefined) {
+                    return COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length]
+                }
+            }
+            return defaultColor
+        }
+
         return astrolabeNodes
             .filter(node => !isCanvasMode || visibleNodes.includes(node.id))
             .map(node => ({
@@ -921,20 +994,20 @@ function LocalEditorContent() {
                 dependsOnCount: 0,
                 usedByCount: 0,
                 depth: 0,
-                // Default styles - directly use backend-returned values
-                defaultColor: node.defaultColor,
+                // Default styles - apply community color if enabled
+                defaultColor: getNodeColor(node.id, node.defaultColor),
                 defaultSize: node.defaultSize,
                 defaultShape: node.defaultShape,
                 // User override styles - from meta.json
                 meta: {
-                    size: node.size,
+                    size: getNodeSize(node.id, node.size),
                     shape: node.shape,
                     effect: node.effect,
                     // Position information - used for direct positioning during initialization, avoiding physics simulation "pulling"
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, analysisData.pagerank, analysisData.indegree, colorMappingMode, analysisData.communities, COMMUNITY_COLORS])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -1046,6 +1119,70 @@ function LocalEditorContent() {
         return calculateNodeStatusLines(selectedNode?.leanFilePath, astrolabeNodes)
     }, [selectedNode?.leanFilePath, astrolabeNodes])
 
+    // Compute analysis (PageRank, degree, communities)
+    const computeAnalysis = useCallback(async () => {
+        if (!projectPath) return
+
+        setAnalysisLoading(true)
+        try {
+            const baseUrl = 'http://127.0.0.1:8765/api/project/analysis'
+            const pathParam = `path=${encodeURIComponent(projectPath)}`
+
+            // Fetch all analysis data in parallel
+            const [pagerankRes, degreeRes, communitiesRes] = await Promise.all([
+                fetch(`${baseUrl}/pagerank?${pathParam}&top_k=10000`),
+                fetch(`${baseUrl}/degree?${pathParam}`),
+                fetch(`${baseUrl}/communities?${pathParam}`),
+            ])
+
+            // Parse responses
+            const pagerankData = pagerankRes.ok ? await pagerankRes.json() : null
+            const degreeData = degreeRes.ok ? await degreeRes.json() : null
+            const communitiesData = communitiesRes.ok ? await communitiesRes.json() : null
+
+            // Build pagerank map
+            const pagerankMap: Record<string, number> = {}
+            if (pagerankData?.data?.topNodes) {
+                for (const item of pagerankData.data.topNodes) {
+                    pagerankMap[item.nodeId] = item.value
+                }
+            }
+
+            // Build indegree map from top in-degree nodes
+            const indegreeMap: Record<string, number> = {}
+            if (degreeData?.data?.topInDegree) {
+                for (const item of degreeData.data.topInDegree) {
+                    indegreeMap[item.nodeId] = item.degree
+                }
+            }
+
+            // Build communities map from topCommunities
+            const communitiesMap: Record<string, number> = {}
+            if (communitiesData?.data?.topCommunities) {
+                for (const community of communitiesData.data.topCommunities) {
+                    for (const nodeId of community.members) {
+                        communitiesMap[nodeId] = community.id
+                    }
+                }
+            }
+
+            setAnalysisData({
+                pagerank: pagerankMap,
+                indegree: indegreeMap,
+                communities: communitiesMap,
+                communityCount: communitiesData?.data?.numCommunities,
+                modularity: communitiesData?.data?.modularity,
+                nodeCount: pagerankData?.numNodes ?? degreeData?.numNodes,
+                edgeCount: pagerankData?.numEdges ?? degreeData?.numEdges,
+                density: pagerankData ? pagerankData.numEdges / (pagerankData.numNodes * (pagerankData.numNodes - 1) || 1) : undefined,
+            })
+        } catch (error) {
+            console.error('Analysis failed:', error)
+        } finally {
+            setAnalysisLoading(false)
+        }
+    }, [projectPath])
+
     // Handle node click (adapted to Node type)
     const handleCanvasNodeClick = useCallback((node: Node | null) => {
         // Clear edge selection when clicking on a node
@@ -1078,6 +1215,26 @@ function LocalEditorContent() {
         // If in add edge mode, handle target node selection
         if (isAddingEdge && selectedNode) {
             handleAddCustomEdge(node.id)
+            return
+        }
+
+        // Check if it's a namespace bubble (group node)
+        if (node.id.startsWith('group:')) {
+            // Extract namespace from group id (format: "group:Namespace.Path")
+            const namespace = node.id.replace('group:', '')
+            // Create a fake GraphNode for the namespace bubble
+            const fakeGraphNode: GraphNode = {
+                id: node.id,
+                name: `📁 ${namespace}`,  // Add folder icon to indicate namespace
+                type: 'custom',  // Use 'custom' as namespace is a virtual node
+                status: 'unknown',
+                notes: undefined,
+                leanFilePath: undefined,
+                leanLineNumber: undefined,
+            }
+            selectNode(fakeGraphNode)
+            // Focus camera on the bubble
+            setFocusNodeId(node.id)
             return
         }
 
@@ -1789,6 +1946,70 @@ function LocalEditorContent() {
                                                                 </div>
                                                             )}
                                                         </div>
+
+                                                        {/* Community Clustering */}
+                                                        <div className="mt-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={physics.communityAwareLayout}
+                                                                    disabled={!analysisData.communities}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, communityAwareLayout: e.target.checked })}
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40 disabled:opacity-30"
+                                                                />
+                                                                <span className={`text-xs ${analysisData.communities ? 'text-white/80' : 'text-white/40'}`}>Community Clustering</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('communityClustering') ? next.delete('communityClustering') : next.add('communityClustering')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {expandedInfoTips.has('communityClustering') && (
+                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
+                                                                    Group nodes by detected communities (Louvain algorithm). Requires running &quot;Compute Analysis&quot; first.
+                                                                </p>
+                                                            )}
+                                                            {!analysisData.communities && (
+                                                                <p className="text-[10px] text-amber-400/60 mt-1 ml-5">
+                                                                    Run &quot;Compute Analysis&quot; to enable
+                                                                </p>
+                                                            )}
+                                                            {physics.communityAwareLayout && analysisData.communities && (
+                                                                <div className="mt-2 ml-5 space-y-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Compact</span>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0"
+                                                                            max="2.0"
+                                                                            step="0.05"
+                                                                            value={physics.communityClusteringStrength ?? 0.3}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, communityClusteringStrength: parseFloat(e.target.value) })}
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                        />
+                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.communityClusteringStrength ?? 0.3).toFixed(1)}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Separate</span>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0"
+                                                                            max="3.0"
+                                                                            step="0.1"
+                                                                            value={physics.communitySeparation ?? 0.5}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, communitySeparation: parseFloat(e.target.value) })}
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                        />
+                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.communitySeparation ?? 0.5).toFixed(1)}</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                         </div>
                                                         )}
                                                     </div>
@@ -1893,6 +2114,111 @@ function LocalEditorContent() {
                                                         )}
                                                     </div>
                                                 )}
+
+                                                {/* === ANALYSIS === */}
+                                                <div className="border-t border-white/10 pt-3">
+                                                    <button
+                                                        onClick={() => toggleSection('analysis')}
+                                                        className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                    >
+                                                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('analysis') ? '-rotate-90' : ''}`} />
+                                                        <ChartBarIcon className="w-4 h-4" />
+                                                        <span className="text-[10px] uppercase tracking-wider font-medium">🔬 Analysis</span>
+                                                    </button>
+                                                    {!collapsedSections.has('analysis') && (
+                                                    <div className="ml-5 mt-2 space-y-3">
+                                                        {/* Basic Stats */}
+                                                        <div className="text-xs text-white/60 space-y-1">
+                                                            <div className="flex justify-between">
+                                                                <span>Nodes:</span>
+                                                                <span className="text-white/80">{analysisData.nodeCount ?? astrolabeNodes.length}</span>
+                                                            </div>
+                                                            <div className="flex justify-between">
+                                                                <span>Edges:</span>
+                                                                <span className="text-white/80">{analysisData.edgeCount ?? astrolabeEdges.length}</span>
+                                                            </div>
+                                                            <div className="flex justify-between">
+                                                                <span>Density:</span>
+                                                                <span className="text-white/80">{analysisData.density?.toFixed(4) ?? '—'}</span>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Size Mapping */}
+                                                        <div>
+                                                            <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
+                                                            <div className="flex gap-1 mt-1">
+                                                                {(['default', 'pagerank', 'indegree'] as const).map(mode => (
+                                                                    <button
+                                                                        key={mode}
+                                                                        onClick={() => setSizeMappingMode(mode)}
+                                                                        className={`flex-1 py-1 text-[10px] rounded transition-colors ${
+                                                                            sizeMappingMode === mode
+                                                                                ? 'bg-blue-500/30 text-blue-300'
+                                                                                : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                                                        } ${(mode === 'pagerank' && !analysisData.pagerank) || (mode === 'indegree' && !analysisData.indegree) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={(mode === 'pagerank' && !analysisData.pagerank) || (mode === 'indegree' && !analysisData.indegree)}
+                                                                    >
+                                                                        {mode === 'default' ? 'Default' : mode === 'pagerank' ? 'PageRank' : 'In-deg'}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Color Mapping (placeholder) */}
+                                                        <div>
+                                                            <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
+                                                            <div className="flex gap-1 mt-1">
+                                                                {(['kind', 'community'] as const).map(mode => (
+                                                                    <button
+                                                                        key={mode}
+                                                                        onClick={() => setColorMappingMode(mode)}
+                                                                        className={`flex-1 py-1 text-[10px] rounded transition-colors ${
+                                                                            colorMappingMode === mode
+                                                                                ? 'bg-blue-500/30 text-blue-300'
+                                                                                : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                                                        } ${mode === 'community' && !analysisData.communities ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={mode === 'community' && !analysisData.communities}
+                                                                    >
+                                                                        {mode === 'kind' ? 'Kind' : 'Community'}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Compute Button */}
+                                                        <button
+                                                            onClick={computeAnalysis}
+                                                            disabled={analysisLoading || !projectPath}
+                                                            className="w-full py-1.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                                        >
+                                                            {analysisLoading ? (
+                                                                <>
+                                                                    <div className="w-3 h-3 border-2 border-purple-300/30 border-t-purple-300 rounded-full animate-spin" />
+                                                                    Computing...
+                                                                </>
+                                                            ) : (
+                                                                'Compute Analysis'
+                                                            )}
+                                                        </button>
+
+                                                        {/* Status indicators */}
+                                                        {(analysisData.pagerank || analysisData.communities) && (
+                                                            <div className="text-[10px] text-green-400/60 space-y-0.5">
+                                                                {analysisData.pagerank && (
+                                                                    <p>✓ PageRank ({Object.keys(analysisData.pagerank).length} nodes)</p>
+                                                                )}
+                                                                {analysisData.indegree && (
+                                                                    <p>✓ In-degree ({Object.keys(analysisData.indegree).length} nodes)</p>
+                                                                )}
+                                                                {analysisData.communities && (
+                                                                    <p>✓ Communities: {analysisData.communityCount} (mod: {analysisData.modularity?.toFixed(3)})</p>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                    </div>
+                                                    )}
+                                                </div>
 
                                                 {/* === ACTIONS === */}
                                                 <div className="border-t border-white/10 pt-3">
@@ -2007,6 +2333,7 @@ function LocalEditorContent() {
                                     isRemovingNodes={isRemovingNodes}
                                     nodesWithHiddenNeighbors={nodesWithHiddenNeighbors}
                                     getPositionsRef={getPositionsRef}
+                                    nodeCommunities={nodeCommunities}
                                 />
                             ) : (
                                 <SigmaGraph
