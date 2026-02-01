@@ -35,6 +35,71 @@ class DocumentSymbol:
     children: list["DocumentSymbol"]
 
 
+# LSP Diagnostic severity levels
+SEVERITY_ERROR = 1
+SEVERITY_WARNING = 2
+SEVERITY_INFO = 3
+SEVERITY_HINT = 4
+
+
+def parse_diagnostics_notification(notification: dict) -> dict:
+    """
+    Parse a textDocument/publishDiagnostics notification.
+
+    Args:
+        notification: The LSP notification dict
+
+    Returns:
+        {
+            "uri": "file:///path/to/file.lean",
+            "diagnostics": [
+                {"severity": 1, "message": "...", "range": {...}},
+                ...
+            ]
+        }
+    """
+    params = notification.get("params", {})
+    return {
+        "uri": params.get("uri", ""),
+        "diagnostics": params.get("diagnostics", [])
+    }
+
+
+def infer_proof_status(diagnostics: list) -> str:
+    """
+    Infer proof status from diagnostics.
+
+    Args:
+        diagnostics: List of diagnostic objects with severity and message
+
+    Returns:
+        "error" - if any error-level diagnostic exists
+        "sorry" - if any diagnostic mentions 'sorry'
+        "proven" - otherwise (clean file)
+    """
+    has_error = False
+    has_sorry = False
+
+    for diag in diagnostics:
+        severity = diag.get("severity", 0)
+        message = diag.get("message", "").lower()
+
+        # Check for errors (severity 1)
+        if severity == SEVERITY_ERROR:
+            has_error = True
+
+        # Check for sorry (can be warning or info level)
+        if "sorry" in message:
+            has_sorry = True
+
+    # Error takes precedence
+    if has_error:
+        return "error"
+    if has_sorry:
+        return "sorry"
+    return "proven"
+
+
 def format_lsp_request(method: str, params: dict, request_id: int) -> str:
     """Format an LSP JSON-RPC request"""
     request = {
@@ -74,6 +139,8 @@ class LeanLSPClient:
         self.is_initialized = False
         self._request_id = 0
         self._buffer = b""
+        self._opened_files: set[str] = set()  # Track files already opened
+        self._diagnostics: dict[str, list] = {}  # uri -> diagnostics list
 
     async def start(self) -> None:
         """Start the Lean language server"""
@@ -219,11 +286,19 @@ class LeanLSPClient:
 
             # First check if this is a server-initiated message (has 'method' field)
             if "method" in message:
+                method = message.get("method", "")
+
+                # Capture diagnostics notifications
+                if method == "textDocument/publishDiagnostics":
+                    parsed = parse_diagnostics_notification(message)
+                    uri = parsed["uri"]
+                    self._diagnostics[uri] = parsed["diagnostics"]
+
                 # Handle server-to-client requests (need to respond)
                 if "id" in message:
                     # This is a request from server, send empty response
                     await self._send_response(message["id"], None)
-                # Notifications (method but no id) are just informational, ignore
+                # Continue to wait for our response
                 continue
 
             # This is a response to one of our requests
@@ -245,18 +320,20 @@ class LeanLSPClient:
         if not self.is_initialized:
             raise RuntimeError("LSP client not initialized")
 
-        # Open the document first
+        # Open the document first (only if not already opened)
         file_uri = f"file://{file_path}"
-        content = file_path.read_text()
 
-        await self._send_notification("textDocument/didOpen", {
-            "textDocument": {
-                "uri": file_uri,
-                "languageId": "lean4",
-                "version": 1,
-                "text": content
-            }
-        })
+        if file_uri not in self._opened_files:
+            content = file_path.read_text()
+            await self._send_notification("textDocument/didOpen", {
+                "textDocument": {
+                    "uri": file_uri,
+                    "languageId": "lean4",
+                    "version": 1,
+                    "text": content
+                }
+            })
+            self._opened_files.add(file_uri)
 
         # Retry until we get symbols (file may need processing time)
         for attempt in range(max_retries):
@@ -277,6 +354,68 @@ class LeanLSPClient:
 
         # Return empty list if no symbols found after retries
         return []
+
+    async def get_file_diagnostics(
+        self,
+        file_path: Path,
+        max_retries: int = 5,
+        retry_delay: float = 0.5
+    ) -> list[dict]:
+        """
+        Get diagnostics for a file.
+
+        Diagnostics are collected from publishDiagnostics notifications
+        that arrive after opening a file.
+
+        Returns:
+            List of diagnostic objects:
+            [
+                {
+                    "severity": 1,  # 1=error, 2=warning, 3=info, 4=hint
+                    "message": "error message",
+                    "range": {"start": {"line": 0, "character": 0}, ...}
+                },
+                ...
+            ]
+        """
+        if not self.is_initialized:
+            raise RuntimeError("LSP client not initialized")
+
+        file_uri = f"file://{file_path}"
+
+        # If file not opened, open it first (this triggers diagnostics)
+        if file_uri not in self._opened_files:
+            content = file_path.read_text()
+            await self._send_notification("textDocument/didOpen", {
+                "textDocument": {
+                    "uri": file_uri,
+                    "languageId": "lean4",
+                    "version": 1,
+                    "text": content
+                }
+            })
+            self._opened_files.add(file_uri)
+
+        # Wait for diagnostics to arrive
+        # Diagnostics come via notifications, so we need to trigger message reading
+        for _ in range(max_retries):
+            # Send a dummy request to trigger message reading
+            # This allows us to receive any pending notifications
+            try:
+                await self._send_request("textDocument/documentSymbol", {
+                    "textDocument": {"uri": file_uri}
+                })
+            except Exception:
+                pass
+
+            await asyncio.sleep(retry_delay)
+
+            # Check if we have diagnostics now
+            if file_uri in self._diagnostics:
+                return self._diagnostics[file_uri]
+
+        # Return whatever we have (may be empty)
+        return self._diagnostics.get(file_uri, [])
 
     def _parse_document_symbol(self, item: dict) -> Optional[DocumentSymbol]:
         """Parse a document symbol from LSP response"""

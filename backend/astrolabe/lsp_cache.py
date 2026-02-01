@@ -200,7 +200,7 @@ async def build_lsp_cache(
                 continue
 
             try:
-                # Get document symbols
+                # Get document symbols (this also triggers diagnostics collection)
                 symbols = await client.get_document_symbols(
                     file_path_obj,
                     max_retries=5,
@@ -211,9 +211,11 @@ async def build_lsp_cache(
                 symbol_dicts = [_symbol_to_dict(s) for s in symbols]
                 cache.add_file_symbols(file_path, symbol_dicts)
 
-                # Diagnostics are sent via notifications during symbol fetching
-                # For now, we store empty diagnostics (can be enhanced later)
-                cache.add_file_diagnostics(file_path, [])
+                # Get diagnostics collected during symbol fetching
+                # Diagnostics come via publishDiagnostics notifications
+                file_uri = f"file://{file_path_obj}"
+                diagnostics = client._diagnostics.get(file_uri, [])
+                cache.add_file_diagnostics(file_path, diagnostics)
 
             except Exception as e:
                 print(f"Warning: Failed to process {file_path}: {e}")
