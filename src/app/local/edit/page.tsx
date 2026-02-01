@@ -244,9 +244,9 @@ function LocalEditorContent() {
     }, [])
 
     // Analysis panel state
-    const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree'>('default')
+    const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree' | 'depth' | 'bottleneck' | 'reachability'>('default')
     const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
-    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community'>('kind')
+    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community' | 'layer' | 'spectral'>('kind')
     const [analysisData, setAnalysisData] = useState<{
         pagerank?: Record<string, number>
         indegree?: Record<string, number>
@@ -256,6 +256,19 @@ function LocalEditorContent() {
         nodeCount?: number
         edgeCount?: number
         density?: number
+        // DAG analysis
+        depths?: Record<string, number>
+        layers?: Record<string, number>
+        bottleneckScores?: Record<string, number>
+        reachability?: Record<string, number>
+        graphDepth?: number
+        numLayers?: number
+        sources?: string[]
+        sinks?: string[]
+        criticalPath?: string[]
+        // Spectral clustering
+        spectralClusters?: Record<string, number>
+        numSpectralClusters?: number
     }>({})
     const [analysisLoading, setAnalysisLoading] = useState(false)
 
@@ -1012,32 +1025,82 @@ function LocalEditorContent() {
         // sizeContrast 0 → exponent 1.0 (uniform), sizeContrast 1 → exponent 0.2 (max contrast)
         const sizeExponent = 1.0 - sizeContrast * 0.8
         const getNodeSize = (nodeId: string, metaSize?: number): number | undefined => {
+            // Helper to normalize and scale
+            const normalizeAndScale = (value: number, min: number, max: number): number => {
+                const normalized = max > min ? (value - min) / (max - min) : 0.5
+                return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
+            }
+
             if (sizeMappingMode === 'pagerank' && analysisData.pagerank) {
                 const pr = analysisData.pagerank[nodeId]
                 if (pr !== undefined) {
-                    const maxPR = Math.max(...Object.values(analysisData.pagerank))
-                    const minPR = Math.min(...Object.values(analysisData.pagerank))
-                    const normalized = maxPR > minPR ? (pr - minPR) / (maxPR - minPR) : 0.5
-                    return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
+                    const values = Object.values(analysisData.pagerank)
+                    return normalizeAndScale(pr, Math.min(...values), Math.max(...values))
                 }
             }
             if (sizeMappingMode === 'indegree' && analysisData.indegree) {
                 const deg = analysisData.indegree[nodeId]
                 if (deg !== undefined) {
                     const maxDeg = Math.max(...Object.values(analysisData.indegree))
-                    const normalized = maxDeg > 0 ? deg / maxDeg : 0
-                    return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
+                    return normalizeAndScale(deg, 0, maxDeg)
+                }
+            }
+            if (sizeMappingMode === 'depth' && analysisData.depths) {
+                const depth = analysisData.depths[nodeId]
+                if (depth !== undefined) {
+                    const maxDepth = analysisData.graphDepth || Math.max(...Object.values(analysisData.depths))
+                    return normalizeAndScale(depth, 0, maxDepth)
+                }
+            }
+            if (sizeMappingMode === 'bottleneck' && analysisData.bottleneckScores) {
+                const score = analysisData.bottleneckScores[nodeId]
+                if (score !== undefined) {
+                    const values = Object.values(analysisData.bottleneckScores)
+                    return normalizeAndScale(score, Math.min(...values), Math.max(...values))
+                }
+            }
+            if (sizeMappingMode === 'reachability' && analysisData.reachability) {
+                const reach = analysisData.reachability[nodeId]
+                if (reach !== undefined) {
+                    const maxReach = Math.max(...Object.values(analysisData.reachability))
+                    return normalizeAndScale(reach, 0, maxReach)
                 }
             }
             return metaSize // Use original meta size (undefined means use default)
         }
 
-        // Calculate color based on community mapping
+        // Layer color palette (gradient from light to dark blue)
+        const LAYER_COLORS = [
+            '#93c5fd', // blue-300
+            '#60a5fa', // blue-400
+            '#3b82f6', // blue-500
+            '#2563eb', // blue-600
+            '#1d4ed8', // blue-700
+            '#1e40af', // blue-800
+            '#1e3a8a', // blue-900
+            '#172554', // blue-950
+        ]
+
+        // Calculate color based on color mapping mode
         const getNodeColor = (nodeId: string, defaultColor: string): string => {
             if (colorMappingMode === 'community' && analysisData.communities) {
                 const communityId = analysisData.communities[nodeId]
                 if (communityId !== undefined) {
                     return COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length]
+                }
+            }
+            if (colorMappingMode === 'layer' && analysisData.layers) {
+                const layer = analysisData.layers[nodeId]
+                if (layer !== undefined) {
+                    const numLayers = analysisData.numLayers || Math.max(...Object.values(analysisData.layers)) + 1
+                    const colorIndex = Math.floor((layer / numLayers) * (LAYER_COLORS.length - 1))
+                    return LAYER_COLORS[Math.min(colorIndex, LAYER_COLORS.length - 1)]
+                }
+            }
+            if (colorMappingMode === 'spectral' && analysisData.spectralClusters) {
+                const clusterId = analysisData.spectralClusters[nodeId]
+                if (clusterId !== undefined) {
+                    return COMMUNITY_COLORS[clusterId % COMMUNITY_COLORS.length]
                 }
             }
             return defaultColor
@@ -1070,7 +1133,7 @@ function LocalEditorContent() {
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, colorMappingMode, analysisData.communities, COMMUNITY_COLORS])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, COMMUNITY_COLORS])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -1182,7 +1245,7 @@ function LocalEditorContent() {
         return calculateNodeStatusLines(selectedNode?.leanFilePath, astrolabeNodes)
     }, [selectedNode?.leanFilePath, astrolabeNodes])
 
-    // Compute analysis (PageRank, degree, communities)
+    // Compute analysis (PageRank, degree, communities, DAG metrics)
     const computeAnalysis = useCallback(async () => {
         if (!projectPath) return
 
@@ -1192,16 +1255,20 @@ function LocalEditorContent() {
             const pathParam = `path=${encodeURIComponent(projectPath)}`
 
             // Fetch all analysis data in parallel
-            const [pagerankRes, degreeRes, communitiesRes] = await Promise.all([
+            const [pagerankRes, degreeRes, communitiesRes, dagRes, spectralRes] = await Promise.all([
                 fetch(`${baseUrl}/pagerank?${pathParam}&top_k=10000`),
                 fetch(`${baseUrl}/degree?${pathParam}`),
                 fetch(`${baseUrl}/communities?${pathParam}`),
+                fetch(`${baseUrl}/dag?${pathParam}&include_all_depths=true&include_all_scores=true`),
+                fetch(`${baseUrl}/spectral?${pathParam}&n_clusters=8`),
             ])
 
             // Parse responses
             const pagerankData = pagerankRes.ok ? await pagerankRes.json() : null
             const degreeData = degreeRes.ok ? await degreeRes.json() : null
             const communitiesData = communitiesRes.ok ? await communitiesRes.json() : null
+            const dagData = dagRes.ok ? await dagRes.json() : null
+            const spectralData = spectralRes.ok ? await spectralRes.json() : null
 
             // Build pagerank map
             const pagerankMap: Record<string, number> = {}
@@ -1238,6 +1305,19 @@ function LocalEditorContent() {
                 nodeCount: pagerankData?.numNodes ?? degreeData?.numNodes,
                 edgeCount: pagerankData?.numEdges ?? degreeData?.numEdges,
                 density: pagerankData ? pagerankData.numEdges / (pagerankData.numNodes * (pagerankData.numNodes - 1) || 1) : undefined,
+                // DAG analysis
+                depths: dagData?.data?.allDepths,
+                layers: dagData?.data?.allDepths, // layers are same as depths
+                bottleneckScores: dagData?.data?.allBottleneckScores,
+                reachability: dagData?.data?.allReachability,
+                graphDepth: dagData?.data?.graphDepth,
+                numLayers: dagData?.data?.numLayers,
+                sources: dagData?.data?.sources,
+                sinks: dagData?.data?.sinks,
+                criticalPath: dagData?.data?.criticalPath,
+                // Spectral clustering
+                spectralClusters: spectralData?.data?.clusters,
+                numSpectralClusters: spectralData?.data?.numClusters,
             })
         } catch (error) {
             console.error('Analysis failed:', error)
@@ -2495,19 +2575,26 @@ $$F_c = k_c \\cdot d_{center}$$
                                                         {/* Size Mapping */}
                                                         <div>
                                                             <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
-                                                            <div className="flex gap-1 mt-1">
-                                                                {(['default', 'pagerank', 'indegree'] as const).map(mode => (
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {([
+                                                                    { mode: 'default' as const, label: 'Default', data: true },
+                                                                    { mode: 'pagerank' as const, label: 'PageRank', data: analysisData.pagerank },
+                                                                    { mode: 'indegree' as const, label: 'In-deg', data: analysisData.indegree },
+                                                                    { mode: 'depth' as const, label: 'Depth', data: analysisData.depths },
+                                                                    { mode: 'bottleneck' as const, label: 'Bottleneck', data: analysisData.bottleneckScores },
+                                                                    { mode: 'reachability' as const, label: 'Reach', data: analysisData.reachability },
+                                                                ]).map(({ mode, label, data }) => (
                                                                     <button
                                                                         key={mode}
                                                                         onClick={() => setSizeMappingMode(mode)}
-                                                                        className={`flex-1 py-1 text-[10px] rounded transition-colors ${
+                                                                        className={`px-2 py-1 text-[10px] rounded transition-colors ${
                                                                             sizeMappingMode === mode
                                                                                 ? 'bg-blue-500/30 text-blue-300'
                                                                                 : 'bg-white/10 text-white/60 hover:bg-white/20'
-                                                                        } ${(mode === 'pagerank' && !analysisData.pagerank) || (mode === 'indegree' && !analysisData.indegree) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                                        disabled={(mode === 'pagerank' && !analysisData.pagerank) || (mode === 'indegree' && !analysisData.indegree)}
+                                                                        } ${!data ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={!data}
                                                                     >
-                                                                        {mode === 'default' ? 'Default' : mode === 'pagerank' ? 'PageRank' : 'In-deg'}
+                                                                        {label}
                                                                     </button>
                                                                 ))}
                                                             </div>
@@ -2516,19 +2603,24 @@ $$F_c = k_c \\cdot d_{center}$$
                                                         {/* Color Mapping */}
                                                         <div>
                                                             <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
-                                                            <div className="flex gap-1 mt-1">
-                                                                {(['kind', 'community'] as const).map(mode => (
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {([
+                                                                    { mode: 'kind' as const, label: 'Kind', data: true },
+                                                                    { mode: 'community' as const, label: 'Community', data: analysisData.communities },
+                                                                    { mode: 'layer' as const, label: 'Layer', data: analysisData.layers },
+                                                                    { mode: 'spectral' as const, label: 'Spectral', data: analysisData.spectralClusters },
+                                                                ]).map(({ mode, label, data }) => (
                                                                     <button
                                                                         key={mode}
                                                                         onClick={() => setColorMappingMode(mode)}
-                                                                        className={`flex-1 py-1 text-[10px] rounded transition-colors ${
+                                                                        className={`px-2 py-1 text-[10px] rounded transition-colors ${
                                                                             colorMappingMode === mode
                                                                                 ? 'bg-blue-500/30 text-blue-300'
                                                                                 : 'bg-white/10 text-white/60 hover:bg-white/20'
-                                                                        } ${mode === 'community' && !analysisData.communities ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                                        disabled={mode === 'community' && !analysisData.communities}
+                                                                        } ${!data ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={!data}
                                                                     >
-                                                                        {mode === 'kind' ? 'Kind' : 'Community'}
+                                                                        {label}
                                                                     </button>
                                                                 ))}
                                                             </div>
