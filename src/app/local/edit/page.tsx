@@ -1819,31 +1819,27 @@ function LocalEditorContent() {
                                                             )}
                                                             {physics.clusteringEnabled && (
                                                                 <div className="mt-2 ml-5 space-y-2">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Compact</span>
+                                                                    <div>
                                                                         <input
                                                                             type="range"
                                                                             min="0"
                                                                             max="10"
                                                                             step="0.5"
                                                                             value={physics.clusteringStrength}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringStrength: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                            onChange={(e) => {
+                                                                                const intensity = Number(e.target.value)
+                                                                                updatePhysicsUndoable({
+                                                                                    ...physics,
+                                                                                    clusteringStrength: intensity,
+                                                                                    clusterSeparation: intensity * 1.5
+                                                                                })
+                                                                            }}
+                                                                            className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                         />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Separate</span>
-                                                                        <input
-                                                                            type="range"
-                                                                            min="0"
-                                                                            max="10"
-                                                                            step="0.5"
-                                                                            value={physics.clusterSeparation ?? 0.5}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusterSeparation: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                                                                        />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
+                                                                        <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                            <span>Loose</span>
+                                                                            <span>Clustered</span>
+                                                                        </div>
                                                                     </div>
                                                                     <div>
                                                                         <label className="text-[10px] text-white/40 mb-1 block">Depth</label>
@@ -1980,32 +1976,26 @@ function LocalEditorContent() {
                                                                 </p>
                                                             )}
                                                             {physics.communityAwareLayout && analysisData.communities && (
-                                                                <div className="mt-2 ml-5 space-y-2">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Compact</span>
-                                                                        <input
-                                                                            type="range"
-                                                                            min="0"
-                                                                            max="2.0"
-                                                                            step="0.05"
-                                                                            value={physics.communityClusteringStrength ?? 0.3}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, communityClusteringStrength: parseFloat(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                                                                        />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.communityClusteringStrength ?? 0.3).toFixed(1)}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Separate</span>
-                                                                        <input
-                                                                            type="range"
-                                                                            min="0"
-                                                                            max="3.0"
-                                                                            step="0.1"
-                                                                            value={physics.communitySeparation ?? 0.5}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, communitySeparation: parseFloat(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                                                                        />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.communitySeparation ?? 0.5).toFixed(1)}</span>
+                                                                <div className="mt-2 ml-5">
+                                                                    <input
+                                                                        type="range"
+                                                                        min="0"
+                                                                        max="2.0"
+                                                                        step="0.1"
+                                                                        value={physics.communityClusteringStrength ?? 0.3}
+                                                                        onChange={(e) => {
+                                                                            const intensity = parseFloat(e.target.value)
+                                                                            updatePhysicsUndoable({
+                                                                                ...physics,
+                                                                                communityClusteringStrength: intensity,
+                                                                                communitySeparation: intensity * 1.5
+                                                                            })
+                                                                        }}
+                                                                        className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                    />
+                                                                    <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                        <span>Loose</span>
+                                                                        <span>Clustered</span>
                                                                     </div>
                                                                 </div>
                                                             )}
