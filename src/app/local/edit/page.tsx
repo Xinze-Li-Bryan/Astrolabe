@@ -31,7 +31,7 @@ import {
     ChartBarIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
-import { getNamespaceDepthPreview, groupNodesByNamespace } from '@/lib/graphProcessing'
+import { getNamespaceDepthPreview, groupNodesByNamespace, extractNamespace } from '@/lib/graphProcessing'
 import { UIColors } from '@/lib/colors'
 import { PROOF_STATUS_CONFIG, type ProofStatusType } from '@/lib/proofStatus'
 import type { NodeKind, NodeStatus, AstrolabeNode, AstrolabeEdge } from '@/types/graph'
@@ -323,15 +323,16 @@ function LocalEditorContent() {
         return colors
     }, [astrolabeNodes])
 
-    // Compute namespace assignments from node IDs (depth 1 = top-level namespace)
+    // Compute namespace assignments from node names (uses same depth as namespace clustering)
     const namespaceData = useMemo(() => {
         if (!astrolabeNodes || astrolabeNodes.length === 0) return null
         const namespaceMap: Record<string, number> = {}
         const namespaceToId = new Map<string, number>()
         let nextId = 0
+        // Use depth 2 for color mapping - more granular than depth 1
+        const depth = 2
         for (const node of astrolabeNodes) {
-            const parts = node.id.split('.')
-            const namespace = parts.length > 1 ? parts[0] : '_root'
+            const namespace = extractNamespace(node.name, depth) || '_root'
             if (!namespaceToId.has(namespace)) {
                 namespaceToId.set(namespace, nextId++)
             }
