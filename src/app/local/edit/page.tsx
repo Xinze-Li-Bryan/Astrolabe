@@ -1975,7 +1975,7 @@ function LocalEditorContent() {
                                             <div className="h-full overflow-y-auto p-3 flex flex-col gap-4">
                                                 {/* === GRAPH SIMPLIFICATION === */}
                                                 <SortableSection id="graphSimplification" order={sectionOrder.indexOf('graphSimplification')}>
-                                                <div>
+                                                <div className="border-t border-white/10 pt-3">
                                                     <div className="pr-5">
                                                         <button
                                                             onClick={() => toggleSection('graphSimplification')}
