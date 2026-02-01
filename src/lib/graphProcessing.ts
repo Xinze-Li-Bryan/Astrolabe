@@ -607,9 +607,8 @@ export function calculateInterClusterRepulsion(
 
     if (dist < 0.1) continue // Avoid division by zero
 
-    // Repulsion force - stronger and with slower falloff for better separation
-    // Scale by 50 to make the slider more responsive
-    const force = (strength * 50) / (dist + 0.5)
+    // Inverse square falloff - decays quickly with distance to stay bounded
+    const force = strength / (distSq + 1)
 
     fx += (dx / dist) * force
     fy += (dy / dist) * force
@@ -902,17 +901,21 @@ export function buildOctreeSimple(positions: [number, number, number][]): Octree
   }
 
   for (let i = 0; i < positions.length; i++) {
-    insertBody(root, positions[i], i, positions)
+    insertBody(root, positions[i], i, positions, 0)
   }
 
   return root
 }
 
+// Maximum recursion depth to prevent stack overflow when nodes have identical positions
+const MAX_OCTREE_DEPTH = 50
+
 function insertBody(
   node: OctreeNode,
   pos: [number, number, number],
   bodyIndex: number,
-  allPositions: [number, number, number][]
+  allPositions: [number, number, number][],
+  depth: number
 ): void {
   const [px, py, pz] = pos
 
@@ -923,6 +926,18 @@ function insertBody(
     node.comY = py
     node.comZ = pz
     node.bodyIndex = bodyIndex
+    return
+  }
+
+  // Safety check: stop subdividing if we've recursed too deep
+  // This happens when multiple nodes have the same or very close positions
+  if (depth >= MAX_OCTREE_DEPTH) {
+    // Just update center of mass and stop - treat as same position
+    const totalMass = node.mass + 1
+    node.comX = (node.comX * node.mass + px) / totalMass
+    node.comY = (node.comY * node.mass + py) / totalMass
+    node.comZ = (node.comZ * node.mass + pz) / totalMass
+    node.mass = totalMass
     return
   }
 
@@ -947,7 +962,7 @@ function insertBody(
         bodyIndex: -1,
       }
     }
-    insertBody(node.children[octant]!, pos, bodyIndex, allPositions)
+    insertBody(node.children[octant]!, pos, bodyIndex, allPositions, depth + 1)
     return
   }
 
@@ -979,7 +994,7 @@ function insertBody(
     children: null,
     bodyIndex: -1,
   }
-  insertBody(node.children[existingOctant]!, existingPos, existingBodyIndex, allPositions)
+  insertBody(node.children[existingOctant]!, existingPos, existingBodyIndex, allPositions, depth + 1)
 
   // Insert new body into correct child
   const newOctant = getOctant(px, py, pz, node.cx, node.cy, node.cz)
@@ -993,7 +1008,7 @@ function insertBody(
       bodyIndex: -1,
     }
   }
-  insertBody(node.children[newOctant]!, pos, bodyIndex, allPositions)
+  insertBody(node.children[newOctant]!, pos, bodyIndex, allPositions, depth + 1)
 }
 
 /**
