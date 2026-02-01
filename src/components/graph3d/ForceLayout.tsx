@@ -278,6 +278,26 @@ function simulateStep(
     }
   }
 
+  // Boundary constraint - push nodes back if they exceed the boundary radius
+  const boundaryRadius = physics.boundaryRadius ?? 50
+  const boundaryStrength = physics.boundaryStrength ?? 2.0
+  if (boundaryRadius > 0 && boundaryStrength > 0) {
+    nodes.forEach((node) => {
+      const pos = positions.get(node.id)
+      const f = forces.get(node.id)
+      if (!pos || !f) return
+
+      const dist = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2])
+      if (dist > boundaryRadius) {
+        const overshoot = dist - boundaryRadius
+        const pushStrength = boundaryStrength * overshoot
+        f[0] -= (pos[0] / dist) * pushStrength
+        f[1] -= (pos[1] / dist) * pushStrength
+        f[2] -= (pos[2] / dist) * pushStrength
+      }
+    })
+  }
+
   // Apply forces
   const maxVelocity = 10
   let totalMovement = 0
@@ -514,12 +534,14 @@ export function ForceLayout({
     const savedRatio = savedPositionCount / currentCount
 
     // Scale target radius based on node count - larger graphs need more spread
+    // But always respect the boundary constraint
     const edgeCount = edges.length
     const baseRadius = 12
     const dynamicRadius = Math.sqrt(currentCount) * physics.springLength * 0.5
-    // For large graphs (15k+ edges), allow much larger radius
     const maxRadius = edgeCount > 5000 ? 80 : edgeCount > 1000 ? 50 : 24
-    const targetRadius = Math.min(maxRadius, Math.max(baseRadius, dynamicRadius))
+    const boundaryRadius = physics.boundaryRadius ?? 50
+    // Target radius should not exceed boundary radius (with 10% margin for visual comfort)
+    const targetRadius = Math.min(boundaryRadius * 0.9, maxRadius, Math.max(baseRadius, dynamicRadius))
 
     // Calculate center of mass and max radius to detect dense graphs
     let cx = 0, cy = 0, cz = 0
