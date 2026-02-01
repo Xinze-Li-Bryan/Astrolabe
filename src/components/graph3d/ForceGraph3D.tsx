@@ -512,26 +512,18 @@ function GraphScene({
   lensFocusNodeId?: string | null
   onNodeContextMenu?: (node: Node, clientX: number, clientY: number) => void
 }) {
-  // Get lens actions for bubble expansion
-  const { toggleGroupExpanded } = useLensActions()
-
-  // Handler that intercepts bubble clicks to toggle expansion instead of selecting
-  // This avoids expensive edge highlight computation for bubble nodes
+  // Handler for node selection
+  // Bubble left-click: just select/focus (don't expand - use right-click context menu for that)
   const handleNodeSelectWithBubble = useCallback((node: Node | null) => {
     if (!node) {
       onNodeSelect(null)
       return
     }
 
-    // Bubble left-click: toggle expansion (fast path, no edge highlighting)
-    if (node.id.startsWith('group:')) {
-      toggleGroupExpanded(node.id)
-      return
-    }
-
-    // Normal node: proceed with selection
+    // All nodes (including bubbles): proceed with selection
+    // Bubble expansion is handled via right-click context menu
     onNodeSelect(node)
-  }, [toggleGroupExpanded, onNodeSelect])
+  }, [onNodeSelect])
 
   // Node focus
   const focusPosition = focusNodeId ? positionsRef.current.get(focusNodeId) || null : null
@@ -1048,20 +1040,75 @@ export function ForceGraph3D({
 
   // Seed positions for bubble nodes (synthetic namespace groups)
   // Bubbles aren't in allNodes, so they don't get positions from the main effect
-  // Spread bubbles in a circle/sphere pattern based on index for good initial separation
-  // This runs synchronously during render to ensure bubbles have positions before first paint
-  const bubblePositionsSeeded = useMemo(() => {
-    if (lensedGroups.length === 0) return 0
+  // This effect runs when groups change and ensures all bubbles have valid positions
+  const prevGroupKeyRef = useRef<string>('')
 
-    // Get collapsed groups only
-    const collapsedGroups = lensedGroups.filter(g => !g.expanded && !positionsRef.current.has(g.id))
-    if (collapsedGroups.length === 0) return 0
+  useEffect(() => {
+    if (lensedGroups.length === 0) return
 
-    // Spread bubbles in a sphere pattern for good initial separation
-    // Use larger radius so bubbles aren't clustered together
-    const radius = Math.max(40, collapsedGroups.length * 4) // Scale radius with count
+    // Get all collapsed groups (bubbles)
+    const collapsedGroups = lensedGroups.filter(g => !g.expanded)
+    if (collapsedGroups.length === 0) return
 
-    let seededCount = 0
+    // Create a key to detect if groups changed
+    const groupKey = collapsedGroups.map(g => g.id).sort().join(',')
+    const groupsChanged = groupKey !== prevGroupKeyRef.current
+
+    // Count how many bubbles are missing positions
+    let missingCount = 0
+    const existingPositions: [number, number, number][] = []
+    for (const group of collapsedGroups) {
+      const pos = positionsRef.current.get(group.id)
+      if (!pos || Number.isNaN(pos[0])) {
+        missingCount++
+      } else {
+        existingPositions.push(pos)
+      }
+    }
+
+    // Check if positions are clustered (all at same location)
+    let isClustered = false
+    if (existingPositions.length > 5) {
+      let totalDist = 0
+      let count = 0
+      for (let i = 0; i < Math.min(existingPositions.length, 20); i++) {
+        for (let j = i + 1; j < Math.min(existingPositions.length, 20); j++) {
+          const dx = existingPositions[i][0] - existingPositions[j][0]
+          const dy = existingPositions[i][1] - existingPositions[j][1]
+          const dz = existingPositions[i][2] - existingPositions[j][2]
+          totalDist += Math.sqrt(dx * dx + dy * dy + dz * dz)
+          count++
+        }
+      }
+      const avgDist = count > 0 ? totalDist / count : 0
+      if (avgDist < 5) {
+        isClustered = true
+        console.log(`[ForceGraph3D] Bubbles are clustered (avgDist=${avgDist.toFixed(1)})`)
+      }
+    }
+
+    // Determine if we need to seed/reseed
+    const needsSeed = missingCount > 0 || groupsChanged || isClustered
+
+    if (!needsSeed) {
+      // All bubbles have valid, non-clustered positions
+      // Just ensure layoutReady is set
+      if (!layoutReady) {
+        hasShownLayout.current = true
+        setLayoutReady(true)
+        console.log(`[ForceGraph3D] All ${collapsedGroups.length} bubbles have positions, setting layoutReady`)
+      }
+      return
+    }
+
+    // Update the group key
+    prevGroupKeyRef.current = groupKey
+
+    console.log(`[ForceGraph3D] Seeding positions for ${collapsedGroups.length} bubbles (missing=${missingCount}, changed=${groupsChanged}, clustered=${isClustered})`)
+
+    // Spread bubbles in a sphere pattern
+    const radius = Math.min(100, Math.max(30, Math.sqrt(collapsedGroups.length) * 4))
+
     for (let i = 0; i < collapsedGroups.length; i++) {
       const group = collapsedGroups[i]
 
@@ -1074,28 +1121,38 @@ export function ForceGraph3D({
       const z = radius * Math.cos(phi)
 
       // Add small random jitter
-      const jitter = 2
+      const jitter = 3
       positionsRef.current.set(group.id, [
         x + (Math.random() - 0.5) * jitter,
         y + (Math.random() - 0.5) * jitter,
         z + (Math.random() - 0.5) * jitter,
       ])
-      seededCount++
     }
 
-    if (seededCount > 0) {
-      console.log(`[ForceGraph3D] Seeded ${seededCount} bubble positions in sphere pattern (radius: ${radius})`)
-    }
-    return seededCount
-  }, [lensedGroups, positionsRef.current.size]) // Re-run when groups change
+    console.log(`[ForceGraph3D] Seeded ${collapsedGroups.length} bubble positions (radius=${radius})`)
 
-  // Force re-render after bubble positions are seeded (since ref changes don't trigger render)
-  const [, forceRender] = useState(0)
+    // Set layoutReady and force re-render
+    hasShownLayout.current = true
+    setLayoutReady(true)
+  }, [lensedGroups, layoutReady])
+
+
+  // Also set layoutReady when we have lensed nodes with positions but no bubble seeding happened
+  // (e.g., in full/canvas mode or when positions were already valid)
   useEffect(() => {
-    if (bubblePositionsSeeded > 0) {
-      forceRender(n => n + 1)
+    if (lensedNodes.length > 0 && !layoutReady && activeLensId !== 'namespaces') {
+      // Check if all lensed nodes have positions
+      const allHavePositions = lensedNodes.every(n => {
+        const pos = positionsRef.current.get(n.id)
+        return pos && !Number.isNaN(pos[0]) && !Number.isNaN(pos[1]) && !Number.isNaN(pos[2])
+      })
+      if (allHavePositions) {
+        console.log('[ForceGraph3D] All lensed nodes have valid positions, setting layoutReady')
+        hasShownLayout.current = true
+        setLayoutReady(true)
+      }
     }
-  }, [bubblePositionsSeeded])
+  }, [lensedNodes, layoutReady, activeLensId])
 
   const handleNodeSelect = useCallback((node: Node | null) => onNodeSelect?.(node), [onNodeSelect])
   const handleEdgeSelect = useCallback((edge: { id: string; source: string; target: string } | null) => onEdgeSelect?.(edge), [onEdgeSelect])

@@ -161,13 +161,24 @@ export function calculateSpawnPosition(
     if (center) {
       // Add offset to center position to avoid overlap
       // Use Fibonacci sphere for offset direction to ensure uniform dispersion
-      const offsetDir = fibonacciSphere(batchIndex, Math.max(batchTotal, 8))
-      const offsetDist = 3 + batchIndex * 1.5 // Increase offset distance
+      const effectiveTotal = Math.max(batchTotal, 12)
+      const offsetDir = fibonacciSphere(batchIndex, effectiveTotal)
+
+      // Very close to center - physics will fine-tune
+      const baseDistance = 1.5
+      const spacing = 0.1
+      const offsetDist = baseDistance + (batchIndex % effectiveTotal) * spacing
+
+      // Add small random jitter
+      const jitter = 0.5
+      const jx = (Math.random() - 0.5) * jitter
+      const jy = (Math.random() - 0.5) * jitter
+      const jz = (Math.random() - 0.5) * jitter
 
       return [
-        center[0] + offsetDir[0] * offsetDist,
-        center[1] + offsetDir[1] * offsetDist,
-        center[2] + offsetDir[2] * offsetDist,
+        center[0] + offsetDir[0] * offsetDist + jx,
+        center[1] + offsetDir[1] * offsetDist + jy,
+        center[2] + offsetDir[2] * offsetDist + jz,
       ]
     }
   }
@@ -177,25 +188,47 @@ export function calculateSpawnPosition(
     const connectedPos = existingPositions.get(connectedIds[0])!
 
     // Use Fibonacci sphere to generate uniformly distributed direction
-    const dir = fibonacciSphere(batchIndex, Math.max(batchTotal, 8))
-    const dist = 5 + batchIndex * 1.5 // Increase distance to ensure dispersion
+    // Use a larger effective total to ensure better angular spread
+    const effectiveTotal = Math.max(batchTotal, 12)
+    const dir = fibonacciSphere(batchIndex, effectiveTotal)
+
+    // Distance: very close to parent, like radiating outward
+    // Physics simulation will push them to proper distance
+    const baseDistance = 2
+    const spacing = 0.15
+    const dist = baseDistance + (batchIndex % effectiveTotal) * spacing
+
+    // Add small random jitter to prevent perfect alignment
+    const jitter = 0.5
+    const jx = (Math.random() - 0.5) * jitter
+    const jy = (Math.random() - 0.5) * jitter
+    const jz = (Math.random() - 0.5) * jitter
 
     return [
-      connectedPos[0] + dir[0] * dist,
-      connectedPos[1] + dir[1] * dist,
-      connectedPos[2] + dir[2] * dist,
+      connectedPos[0] + dir[0] * dist + jx,
+      connectedPos[1] + dir[1] * dist + jy,
+      connectedPos[2] + dir[2] * dist + jz,
     ]
   }
 
-  // 4. No connected nodes → appear at graph periphery
-  // Use Fibonacci sphere to ensure multiple new nodes are evenly distributed at periphery
-  const dir = fibonacciSphere(batchIndex, Math.max(batchTotal, 8))
-  const outerRadius = radius * 1.3
+  // 4. No connected nodes → appear near graph centroid
+  // Use Fibonacci sphere but keep close - physics will spread them
+  const effectiveTotal = Math.max(batchTotal, 12)
+  const dir = fibonacciSphere(batchIndex, effectiveTotal)
+
+  // Keep close to centroid, not at periphery
+  const spawnRadius = Math.min(radius * 0.5, 10)
+
+  // Add small random jitter
+  const jitter = 1
+  const jx = (Math.random() - 0.5) * jitter
+  const jy = (Math.random() - 0.5) * jitter
+  const jz = (Math.random() - 0.5) * jitter
 
   return [
-    centroid[0] + dir[0] * outerRadius,
-    centroid[1] + dir[1] * outerRadius,
-    centroid[2] + dir[2] * outerRadius,
+    centroid[0] + dir[0] * spawnRadius + jx,
+    centroid[1] + dir[1] * spawnRadius + jy,
+    centroid[2] + dir[2] * spawnRadius + jz,
   ]
 }
 
@@ -223,32 +256,93 @@ export function calculateBatchSpawnPositions(
     radius,
   }
 
-  // Group by number of connected nodes, prioritize those with more connections
-  const nodeConnections = newNodeIds.map(id => ({
-    id,
-    connectedCount: findConnectedNodes(id, edges, existingPositions).length,
-    savedPosition: savedPositions.get(id),
-  }))
+  // Group new nodes by their connected parent(s)
+  // This ensures nodes sharing the same parent are spread around that parent
+  const nodesByParent = new Map<string, { id: string; savedPosition: Position3D | undefined }[]>()
+  const nodesWithSavedPos: { id: string; savedPosition: Position3D }[] = []
+  const nodesWithNoParent: { id: string; savedPosition: Position3D | undefined }[] = []
 
-  // Sort: saved positions first, then by connection count descending
-  nodeConnections.sort((a, b) => {
-    if (a.savedPosition && !b.savedPosition) return -1
-    if (!a.savedPosition && b.savedPosition) return 1
-    return b.connectedCount - a.connectedCount
-  })
+  for (const id of newNodeIds) {
+    const savedPos = savedPositions.get(id)
+    if (savedPos) {
+      nodesWithSavedPos.push({ id, savedPosition: savedPos })
+      continue
+    }
 
-  // Calculate positions one by one
-  nodeConnections.forEach((node, index) => {
+    const connectedIds = findConnectedNodes(id, edges, existingPositions)
+    if (connectedIds.length === 0) {
+      nodesWithNoParent.push({ id, savedPosition: undefined })
+    } else {
+      // Use the first connected node as the "parent" for grouping
+      // This groups siblings together
+      const parentKey = connectedIds.sort().join(',')
+      if (!nodesByParent.has(parentKey)) {
+        nodesByParent.set(parentKey, [])
+      }
+      nodesByParent.get(parentKey)!.push({ id, savedPosition: undefined })
+    }
+  }
+
+  // 1. First, apply saved positions (but reject positions that are too far from centroid)
+  // Use a smaller threshold to reject positions that got pushed too far by physics
+  const maxSavedDistance = Math.min(radius * 0.8, 20) // At most 80% of radius or 20 units
+  const rejectedSavedPos: { id: string; savedPosition: Position3D | undefined }[] = []
+
+  for (const node of nodesWithSavedPos) {
+    const pos = node.savedPosition
+    const dx = pos[0] - centroid[0]
+    const dy = pos[1] - centroid[1]
+    const dz = pos[2] - centroid[2]
+    const distFromCentroid = Math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    if (distFromCentroid > maxSavedDistance) {
+      // Saved position is too far - recalculate
+      rejectedSavedPos.push({ id: node.id, savedPosition: undefined })
+    } else {
+      result.set(node.id, [...pos])
+      context.existingPositions.set(node.id, [...pos])
+    }
+  }
+
+  // Re-categorize rejected nodes (check if they have parents)
+  for (const node of rejectedSavedPos) {
+    const connectedIds = findConnectedNodes(node.id, edges, existingPositions)
+    if (connectedIds.length === 0) {
+      nodesWithNoParent.push(node)
+    } else {
+      const parentKey = connectedIds.sort().join(',')
+      if (!nodesByParent.has(parentKey)) {
+        nodesByParent.set(parentKey, [])
+      }
+      nodesByParent.get(parentKey)!.push(node)
+    }
+  }
+
+  // 2. Process nodes grouped by parent - spread each group around its parent
+  for (const [parentKey, siblings] of nodesByParent) {
+    siblings.forEach((node, siblingIndex) => {
+      const position = calculateSpawnPosition(
+        node.id,
+        undefined,
+        context,
+        siblingIndex,           // Use sibling index for better spread around parent
+        siblings.length         // Total siblings sharing this parent
+      )
+      result.set(node.id, position)
+      context.existingPositions.set(node.id, position)
+    })
+  }
+
+  // 3. Finally, process nodes with no parent (orphans)
+  nodesWithNoParent.forEach((node, index) => {
     const position = calculateSpawnPosition(
       node.id,
-      node.savedPosition,
+      undefined,
       context,
       index,
-      newNodeIds.length
+      nodesWithNoParent.length
     )
     result.set(node.id, position)
-
-    // Add newly calculated position to existing positions for subsequent nodes to reference
     context.existingPositions.set(node.id, position)
   })
 
