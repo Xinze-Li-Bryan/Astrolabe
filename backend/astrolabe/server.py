@@ -14,6 +14,8 @@ import asyncio
 import json
 import time
 
+import networkx as nx
+
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -23,6 +25,11 @@ from watchfiles import awatch
 from .project import Project
 from .graph_cache import GraphCache
 from .unified_storage import UnifiedStorage
+from .analysis import (
+    build_networkx_graph,
+    compute_degree_statistics,
+    compute_pagerank,
+)
 
 
 # Project cache
@@ -1376,6 +1383,128 @@ async def watch_project(websocket: WebSocket, path: str = Query(...)):
             })
         except:
             pass
+
+
+# ============================================
+# Network Analysis API
+# ============================================
+
+
+# Cache for NetworkX graphs (avoid rebuilding on every request)
+_graph_cache: dict[str, tuple[nx.DiGraph, float]] = {}  # path -> (graph, timestamp)
+GRAPH_CACHE_TTL = 60  # seconds
+
+
+def _get_or_build_graph(project: Project) -> nx.DiGraph:
+    """Get cached NetworkX graph or build a new one"""
+    import time as time_module
+    path = project.path
+    now = time_module.time()
+
+    # Check cache
+    if path in _graph_cache:
+        cached_graph, timestamp = _graph_cache[path]
+        if now - timestamp < GRAPH_CACHE_TTL:
+            return cached_graph
+
+    # Build new graph
+    nodes = list(project.nodes.values())
+    edges = project.edges
+    G = build_networkx_graph(nodes, edges, directed=True)
+
+    # Cache it
+    _graph_cache[path] = (G, now)
+    return G
+
+
+@app.get("/api/project/analysis/degree")
+async def get_degree_analysis(
+    path: str = Query(..., description="Project path"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+):
+    """
+    Get degree distribution analysis for the project graph.
+
+    Returns:
+        - inDegree: Incoming edge statistics (how many dependencies each node has)
+        - outDegree: Outgoing edge statistics (how many nodes depend on each)
+        - totalDegree: Combined degree statistics
+        - topInDegree: Nodes with most incoming edges (most dependencies)
+        - topOutDegree: Nodes with most outgoing edges (most depended upon)
+        - shannonEntropy: Entropy of the degree distribution
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    stats = compute_degree_statistics(G, top_k=top_k)
+
+    return {
+        "status": "ok",
+        "analysis": "degree",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": stats.to_dict(),
+    }
+
+
+@app.get("/api/project/analysis/pagerank")
+async def get_pagerank_analysis(
+    path: str = Query(..., description="Project path"),
+    alpha: float = Query(0.85, description="Damping factor (0-1)"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_all: bool = Query(False, description="Include all node values (can be large)"),
+):
+    """
+    Get PageRank centrality analysis for the project graph.
+
+    PageRank identifies the most "important" nodes based on link structure.
+    In Lean projects, high PageRank indicates foundational theorems/lemmas
+    that are referenced by many other important results.
+
+    Args:
+        path: Project path
+        alpha: Damping factor (default 0.85, higher = more weight on link structure)
+        top_k: Number of top nodes to return
+        include_all: If True, include centrality values for all nodes
+
+    Returns:
+        - topNodes: List of top k nodes by PageRank
+        - mean: Mean PageRank value
+        - maxValue: Maximum PageRank value
+        - minValue: Minimum PageRank value
+        - values: (optional) All node PageRank values
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = compute_pagerank(G, alpha=alpha, top_k=top_k)
+
+    response_data = {
+        "topNodes": [{"nodeId": n, "value": v} for n, v in result.top_nodes],
+        "mean": result.mean,
+        "maxValue": result.max_value,
+        "minValue": result.min_value,
+    }
+
+    if include_all:
+        response_data["values"] = result.values
+
+    return {
+        "status": "ok",
+        "analysis": "pagerank",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "alpha": alpha,
+        "data": response_data,
+    }
 
 
 # ============================================
