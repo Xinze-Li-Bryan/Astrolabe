@@ -129,9 +129,16 @@ export const Edge3D = memo(function Edge3D({
   const startPos = positionsRef.current.get(edge.source) || [0, 0, 0]
   const endPos = positionsRef.current.get(edge.target) || [0, 0, 0]
 
-  // Position tracking for effects (must be defined after startPos/endPos)
+  // Position tracking for effects (hooks must be called unconditionally)
   const currentStartRef = useRef<[number, number, number]>(startPos as [number, number, number])
   const currentEndRef = useRef<[number, number, number]>(endPos as [number, number, number])
+
+  // Guard against NaN or identical positions (causes Three.js bounding sphere errors)
+  const hasValidPositions = (
+    !Number.isNaN(startPos[0]) && !Number.isNaN(startPos[1]) && !Number.isNaN(startPos[2]) &&
+    !Number.isNaN(endPos[0]) && !Number.isNaN(endPos[1]) && !Number.isNaN(endPos[2]) &&
+    (startPos[0] !== endPos[0] || startPos[1] !== endPos[1] || startPos[2] !== endPos[2])
+  )
 
   // Calculate curve midpoint (offset perpendicular to line direction)
   const getMidPoint = useCallback((start: [number, number, number], end: [number, number, number]): [number, number, number] => {
@@ -237,6 +244,12 @@ export const Edge3D = memo(function Edge3D({
 
   // Show flow pulse when input/output is highlighted
   const showFlowPulse = isHighlighted && (highlightType === 'input' || highlightType === 'output')
+
+  // Guard against invalid positions (NaN or identical) - render nothing
+  // This check must be AFTER all hooks to comply with Rules of Hooks
+  if (!hasValidPositions) {
+    return null
+  }
 
   // Render bidirectional edge (curved, supports dashed/dotted)
   if (isBidirectional && initialCurvePoints) {

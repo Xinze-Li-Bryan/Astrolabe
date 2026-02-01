@@ -28,6 +28,7 @@ import {
     CubeTransparentIcon,
     BoltIcon,
     WrenchScrewdriverIcon,
+    ChartBarIcon,
 } from '@heroicons/react/24/outline'
 import { useGraphData, type GraphNode } from '@/hooks/useGraphData'
 import { getNamespaceDepthPreview, groupNodesByNamespace } from '@/lib/graphProcessing'
@@ -42,7 +43,7 @@ import { LeanCodePanel } from '@/components/LeanCodePanel'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import { useCanvasStore, type SearchResult } from '@/lib/canvasStore'
 import { calculateNodeStatusLines } from '@/lib/successLines'
-import { readFile, readFullFile, updateNodeMeta, updateEdgeMeta, getViewport, updateViewport, type FileContent, type ViewportData } from '@/lib/api'
+import { readFile, readFullFile, updateNodeMeta, updateEdgeMeta, getViewport, updateViewport, getNamespaceIndex, buildNamespaceIndex, type FileContent, type ViewportData, type NamespaceLocation } from '@/lib/api'
 import type { Node, Edge } from '@/lib/store'
 
 // Dynamically import graph components
@@ -182,6 +183,10 @@ function LocalEditorContent() {
     // Independent code location for edge selection (overrides selectedNode location when set)
     const [codeLocation, setCodeLocation] = useState<{ filePath: string; lineNumber: number } | null>(null)
 
+    // Namespace index cache for fast "Jump to Code" from namespace bubbles
+    const [namespaceIndex, setNamespaceIndex] = useState<Map<string, NamespaceLocation>>(new Map())
+    const [lspBuilding, setLspBuilding] = useState(false)  // LSP index building in progress
+    const [lspStatus, setLspStatus] = useState<string | null>(null)  // LSP status message for bottom bar
 
     // Canvas store - manages on-demand added nodes
     // Note: Most mutation operations use graphActions for undo support
@@ -238,6 +243,42 @@ function LocalEditorContent() {
         })
     }, [])
 
+    // Analysis panel state
+    const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree'>('default')
+    const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
+    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community'>('kind')
+    const [analysisData, setAnalysisData] = useState<{
+        pagerank?: Record<string, number>
+        indegree?: Record<string, number>
+        communities?: Record<string, number>
+        communityCount?: number
+        modularity?: number
+        nodeCount?: number
+        edgeCount?: number
+        density?: number
+    }>({})
+    const [analysisLoading, setAnalysisLoading] = useState(false)
+
+    // Community color palette (10 distinct colors)
+    const COMMUNITY_COLORS = useMemo(() => [
+        '#ef4444', // red
+        '#f97316', // orange
+        '#eab308', // yellow
+        '#22c55e', // green
+        '#14b8a6', // teal
+        '#3b82f6', // blue
+        '#8b5cf6', // violet
+        '#ec4899', // pink
+        '#6366f1', // indigo
+        '#06b6d4', // cyan
+    ], [])
+
+    // Convert communities object to Map for ForceLayout
+    const nodeCommunities = useMemo(() => {
+        if (!analysisData.communities) return null
+        return new Map(Object.entries(analysisData.communities))
+    }, [analysisData.communities])
+
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
     const {
@@ -291,6 +332,64 @@ function LocalEditorContent() {
     useEffect(() => {
         hasAutoSelectedRef.current = false
     }, [projectPath])
+
+    // Load existing namespace index when project is ready (does NOT auto-build)
+    useEffect(() => {
+        if (!projectPath || graphLoading || needsInit) return
+
+        const loadNamespaceIndex = async () => {
+            try {
+                const result = await getNamespaceIndex(projectPath)
+                if (result.namespaces.length > 0) {
+                    const indexMap = new Map<string, NamespaceLocation>()
+                    for (const ns of result.namespaces) {
+                        indexMap.set(ns.name, ns)
+                    }
+                    setNamespaceIndex(indexMap)
+                    console.log(`[LSP] Loaded ${result.namespaces.length} namespaces from lsp.json`)
+                } else {
+                    console.log('[LSP] No lsp.json cache found. Click LSP button to build.')
+                }
+            } catch (error) {
+                console.warn('[LSP] Failed to load index:', error)
+            }
+        }
+
+        loadNamespaceIndex()
+    }, [projectPath, graphLoading, needsInit])
+
+    // Manual LSP build function
+    const handleBuildLsp = useCallback(async () => {
+        if (!projectPath || lspBuilding) return
+
+        setLspBuilding(true)
+        setLspStatus('Connecting to Lean LSP...')
+        console.log('[LSP] Building index...')
+
+        try {
+            setLspStatus('Building LSP cache (scanning files)...')
+            const result = await buildNamespaceIndex(projectPath)
+            console.log(`[LSP] Built index with ${result.count} namespaces, ${result.file_count} files`)
+            setLspStatus(`LSP cache built: ${result.count} namespaces`)
+
+            // Reload the index into memory
+            const loaded = await getNamespaceIndex(projectPath)
+            const indexMap = new Map<string, NamespaceLocation>()
+            for (const ns of loaded.namespaces) {
+                indexMap.set(ns.name, ns)
+            }
+            setNamespaceIndex(indexMap)
+
+            // Clear status after a short delay
+            setTimeout(() => setLspStatus(null), 3000)
+        } catch (error) {
+            console.error('[LSP] Failed to build index:', error)
+            setLspStatus('LSP build failed')
+            setTimeout(() => setLspStatus(null), 5000)
+        } finally {
+            setLspBuilding(false)
+        }
+    }, [projectPath, lspBuilding])
 
     // Status colors - from unified proof status config (memoized for performance)
     const statusColors: Record<string, string> = useMemo(() =>
@@ -907,6 +1006,43 @@ function LocalEditorContent() {
         // Canvas mode: only show visibleNodes (interactive exploration)
         // Other lenses: show all nodes (lens system handles visibility via filtering/aggregation)
         const isCanvasMode = !activeLensId || activeLensId === 'canvas'
+
+        // Calculate size based on analysis mode
+        // Exponent controls contrast: lower = more contrast, higher = more uniform
+        // sizeContrast 0 → exponent 1.0 (uniform), sizeContrast 1 → exponent 0.2 (max contrast)
+        const sizeExponent = 1.0 - sizeContrast * 0.8
+        const getNodeSize = (nodeId: string, metaSize?: number): number | undefined => {
+            if (sizeMappingMode === 'pagerank' && analysisData.pagerank) {
+                const pr = analysisData.pagerank[nodeId]
+                if (pr !== undefined) {
+                    const maxPR = Math.max(...Object.values(analysisData.pagerank))
+                    const minPR = Math.min(...Object.values(analysisData.pagerank))
+                    const normalized = maxPR > minPR ? (pr - minPR) / (maxPR - minPR) : 0.5
+                    return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
+                }
+            }
+            if (sizeMappingMode === 'indegree' && analysisData.indegree) {
+                const deg = analysisData.indegree[nodeId]
+                if (deg !== undefined) {
+                    const maxDeg = Math.max(...Object.values(analysisData.indegree))
+                    const normalized = maxDeg > 0 ? deg / maxDeg : 0
+                    return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
+                }
+            }
+            return metaSize // Use original meta size (undefined means use default)
+        }
+
+        // Calculate color based on community mapping
+        const getNodeColor = (nodeId: string, defaultColor: string): string => {
+            if (colorMappingMode === 'community' && analysisData.communities) {
+                const communityId = analysisData.communities[nodeId]
+                if (communityId !== undefined) {
+                    return COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length]
+                }
+            }
+            return defaultColor
+        }
+
         return astrolabeNodes
             .filter(node => !isCanvasMode || visibleNodes.includes(node.id))
             .map(node => ({
@@ -921,20 +1057,20 @@ function LocalEditorContent() {
                 dependsOnCount: 0,
                 usedByCount: 0,
                 depth: 0,
-                // Default styles - directly use backend-returned values
-                defaultColor: node.defaultColor,
+                // Default styles - apply community color if enabled
+                defaultColor: getNodeColor(node.id, node.defaultColor),
                 defaultSize: node.defaultSize,
                 defaultShape: node.defaultShape,
                 // User override styles - from meta.json
                 meta: {
-                    size: node.size,
+                    size: getNodeSize(node.id, node.size),
                     shape: node.shape,
                     effect: node.effect,
                     // Position information - used for direct positioning during initialization, avoiding physics simulation "pulling"
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, colorMappingMode, analysisData.communities, COMMUNITY_COLORS])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -1046,6 +1182,77 @@ function LocalEditorContent() {
         return calculateNodeStatusLines(selectedNode?.leanFilePath, astrolabeNodes)
     }, [selectedNode?.leanFilePath, astrolabeNodes])
 
+    // Compute analysis (PageRank, degree, communities)
+    const computeAnalysis = useCallback(async () => {
+        if (!projectPath) return
+
+        setAnalysisLoading(true)
+        try {
+            const baseUrl = 'http://127.0.0.1:8765/api/project/analysis'
+            const pathParam = `path=${encodeURIComponent(projectPath)}`
+
+            // Fetch all analysis data in parallel
+            const [pagerankRes, degreeRes, communitiesRes] = await Promise.all([
+                fetch(`${baseUrl}/pagerank?${pathParam}&top_k=10000`),
+                fetch(`${baseUrl}/degree?${pathParam}`),
+                fetch(`${baseUrl}/communities?${pathParam}`),
+            ])
+
+            // Parse responses
+            const pagerankData = pagerankRes.ok ? await pagerankRes.json() : null
+            const degreeData = degreeRes.ok ? await degreeRes.json() : null
+            const communitiesData = communitiesRes.ok ? await communitiesRes.json() : null
+
+            // Build pagerank map
+            const pagerankMap: Record<string, number> = {}
+            if (pagerankData?.data?.topNodes) {
+                for (const item of pagerankData.data.topNodes) {
+                    pagerankMap[item.nodeId] = item.value
+                }
+            }
+
+            // Build indegree map from top in-degree nodes
+            const indegreeMap: Record<string, number> = {}
+            if (degreeData?.data?.topInDegree) {
+                for (const item of degreeData.data.topInDegree) {
+                    indegreeMap[item.nodeId] = item.degree
+                }
+            }
+
+            // Build communities map from topCommunities
+            const communitiesMap: Record<string, number> = {}
+            if (communitiesData?.data?.topCommunities) {
+                for (const community of communitiesData.data.topCommunities) {
+                    for (const nodeId of community.members) {
+                        communitiesMap[nodeId] = community.id
+                    }
+                }
+            }
+
+            setAnalysisData({
+                pagerank: pagerankMap,
+                indegree: indegreeMap,
+                communities: communitiesMap,
+                communityCount: communitiesData?.data?.numCommunities,
+                modularity: communitiesData?.data?.modularity,
+                nodeCount: pagerankData?.numNodes ?? degreeData?.numNodes,
+                edgeCount: pagerankData?.numEdges ?? degreeData?.numEdges,
+                density: pagerankData ? pagerankData.numEdges / (pagerankData.numNodes * (pagerankData.numNodes - 1) || 1) : undefined,
+            })
+        } catch (error) {
+            console.error('Analysis failed:', error)
+        } finally {
+            setAnalysisLoading(false)
+        }
+    }, [projectPath])
+
+    // Auto-compute analysis when project loads
+    useEffect(() => {
+        if (projectPath && astrolabeNodes.length > 0 && !analysisData.pagerank) {
+            computeAnalysis()
+        }
+    }, [projectPath, astrolabeNodes.length, analysisData.pagerank, computeAnalysis])
+
     // Handle node click (adapted to Node type)
     const handleCanvasNodeClick = useCallback((node: Node | null) => {
         // Clear edge selection when clicking on a node
@@ -1078,6 +1285,64 @@ function LocalEditorContent() {
         // If in add edge mode, handle target node selection
         if (isAddingEdge && selectedNode) {
             handleAddCustomEdge(node.id)
+            return
+        }
+
+        // Check if it's a namespace bubble (group node)
+        if (node.id.startsWith('group:')) {
+            // Extract namespace from group id (format: "group:Namespace.Path")
+            const namespace = node.id.replace('group:', '')
+
+            // Focus camera on the bubble immediately
+            setFocusNodeId(node.id)
+
+            // Fast path: check local cache first
+            const cached = namespaceIndex.get(namespace)
+            if (cached?.file_path && cached?.line_number) {
+                console.log('[handleCanvasNodeClick] Using cached namespace location:', namespace)
+                setCodeLocation({ filePath: cached.file_path, lineNumber: cached.line_number })
+                setCodeViewerOpen(true)
+                return
+            }
+
+            // Slow path: fetch from API (uses backend cache or LSP)
+            const fetchNamespaceDeclaration = async () => {
+                try {
+                    const response = await fetch(
+                        `http://127.0.0.1:8765/api/project/namespace-declaration?` +
+                        `path=${encodeURIComponent(projectPath)}&namespace=${encodeURIComponent(namespace)}`
+                    )
+                    if (response.ok) {
+                        const data = await response.json()
+                        console.log('[handleCanvasNodeClick] Namespace declaration from API:', namespace, data)
+                        return { filePath: data.file_path, lineNumber: data.line_number }
+                    }
+                } catch (error) {
+                    console.log('[handleCanvasNodeClick] API failed, falling back:', error)
+                }
+
+                // Fallback: Find the earliest node in this namespace
+                const nodesInNamespace = graphNodes
+                    .filter(gn => gn.name.startsWith(namespace + '.') && gn.leanFilePath && gn.leanLineNumber)
+                    .sort((a, b) => {
+                        if (a.leanFilePath !== b.leanFilePath) {
+                            return (a.leanFilePath || '').localeCompare(b.leanFilePath || '')
+                        }
+                        return (a.leanLineNumber || 0) - (b.leanLineNumber || 0)
+                    })
+                const firstNode = nodesInNamespace[0]
+                console.log('[handleCanvasNodeClick] Fallback to first node:', firstNode?.name)
+                return { filePath: firstNode?.leanFilePath, lineNumber: firstNode?.leanLineNumber }
+            }
+
+            // Start async fetch and update code viewer directly
+            fetchNamespaceDeclaration().then(({ filePath, lineNumber }) => {
+                if (filePath && lineNumber) {
+                    setCodeLocation({ filePath, lineNumber })
+                    setCodeViewerOpen(true)
+                    console.log('[handleCanvasNodeClick] Opening code at:', filePath, lineNumber)
+                }
+            })
             return
         }
 
@@ -1557,11 +1822,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('hideTechnical') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Hide auto-generated Lean nodes: type class instances, coercions, decidability proofs, and other implementation details.
-                                                                </p>
-                                                            )}
                                                         </div>
                                                         {/* Transitive Reduction */}
                                                         <div>
@@ -1584,11 +1844,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('transitiveReduction') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Remove redundant edges: if path A→B→C exists, hide the direct A→C edge. Shows only essential dependencies.
-                                                                </p>
-                                                            )}
                                                         </div>
                                                         {/* Hide Orphaned */}
                                                         <div>
@@ -1611,11 +1866,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('hideOrphaned') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Hide nodes that have no connections to other visible nodes. Useful for cleaning up isolated nodes.
-                                                                </p>
-                                                            )}
                                                         </div>
                                                     </div>
                                                     )}
@@ -1624,14 +1874,26 @@ function LocalEditorContent() {
                                                 {/* === LAYOUT OPTIMIZATION === */}
                                                 {viewMode === '3d' && (
                                                     <div className="border-t border-white/10 pt-3">
-                                                        <button
-                                                            onClick={() => toggleSection('layoutOptimization')}
-                                                            className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
-                                                        >
-                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('layoutOptimization') ? '-rotate-90' : ''}`} />
-                                                            <CubeTransparentIcon className="w-4 h-4" />
-                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Layout Optimization</span>
-                                                        </button>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                onClick={() => toggleSection('layoutOptimization')}
+                                                                className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                            >
+                                                                <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('layoutOptimization') ? '-rotate-90' : ''}`} />
+                                                                <CubeTransparentIcon className="w-4 h-4" />
+                                                                <span className="text-[10px] uppercase tracking-wider font-medium">Layout Optimization</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setExpandedInfoTips(prev => {
+                                                                    const next = new Set(prev)
+                                                                    next.has('layoutOptimization') ? next.delete('layoutOptimization') : next.add('layoutOptimization')
+                                                                    return next
+                                                                })}
+                                                                className="text-white/30 hover:text-white/60 p-1"
+                                                            >
+                                                                <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
                                                         {!collapsedSections.has('layoutOptimization') && (
                                                         <div className="ml-5 mt-1">
                                                         {/* Namespace Clustering */}
@@ -1655,38 +1917,29 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('clustering') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Group nodes by Lean namespace. Nodes in the same module cluster together for better structure visualization.
-                                                                </p>
-                                                            )}
                                                             {physics.clusteringEnabled && (
                                                                 <div className="mt-2 ml-5 space-y-2">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Compact</span>
+                                                                    <div>
                                                                         <input
                                                                             type="range"
                                                                             min="0"
                                                                             max="10"
                                                                             step="0.5"
                                                                             value={physics.clusteringStrength}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusteringStrength: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                            onChange={(e) => {
+                                                                                const intensity = Number(e.target.value)
+                                                                                updatePhysicsUndoable({
+                                                                                    ...physics,
+                                                                                    clusteringStrength: intensity,
+                                                                                    clusterSeparation: intensity * 1.5
+                                                                                })
+                                                                            }}
+                                                                            className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                                                                         />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{physics.clusteringStrength.toFixed(1)}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Separate</span>
-                                                                        <input
-                                                                            type="range"
-                                                                            min="0"
-                                                                            max="10"
-                                                                            step="0.5"
-                                                                            value={physics.clusterSeparation ?? 0.5}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, clusterSeparation: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                                                                        />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{(physics.clusterSeparation ?? 0.5).toFixed(1)}</span>
+                                                                        <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                            <span>Loose</span>
+                                                                            <span>Clustered</span>
+                                                                        </div>
                                                                     </div>
                                                                     <div>
                                                                         <label className="text-[10px] text-white/40 mb-1 block">Depth</label>
@@ -1733,8 +1986,61 @@ function LocalEditorContent() {
                                                             )}
                                                         </div>
 
-                                                        {/* Adaptive Springs */}
+                                                        {/* Community Clustering */}
                                                         <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={physics.communityAwareLayout}
+                                                                    disabled={!analysisData.communities}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, communityAwareLayout: e.target.checked })}
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40 disabled:opacity-30"
+                                                                />
+                                                                <span className={`text-xs ${analysisData.communities ? 'text-white/80' : 'text-white/40'}`}>Community Clustering</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('communityClustering') ? next.delete('communityClustering') : next.add('communityClustering')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {!analysisData.communities && (
+                                                                <p className="text-[10px] text-amber-400/60 mt-1 ml-5">
+                                                                    Run &quot;Compute Analysis&quot; to enable
+                                                                </p>
+                                                            )}
+                                                            {physics.communityAwareLayout && analysisData.communities && (
+                                                                <div className="mt-2 ml-5">
+                                                                    <input
+                                                                        type="range"
+                                                                        min="0"
+                                                                        max="2.0"
+                                                                        step="0.1"
+                                                                        value={physics.communityClusteringStrength ?? 0.3}
+                                                                        onChange={(e) => {
+                                                                            const intensity = parseFloat(e.target.value)
+                                                                            updatePhysicsUndoable({
+                                                                                ...physics,
+                                                                                communityClusteringStrength: intensity,
+                                                                                communitySeparation: intensity * 1.5
+                                                                            })
+                                                                        }}
+                                                                        className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                    />
+                                                                    <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                        <span>Loose</span>
+                                                                        <span>Clustered</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Adaptive Springs */}
+                                                        <div className="mt-3">
                                                             <div className="flex items-center gap-2">
                                                                 <input
                                                                     type="checkbox"
@@ -1754,11 +2060,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('adaptiveSprings') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    High-degree hub nodes get longer edges automatically, preventing star-shaped clustering around heavily referenced nodes.
-                                                                </p>
-                                                            )}
                                                             {physics.adaptiveSpringEnabled && (
                                                                 <div className="mt-2 ml-5 space-y-2">
                                                                     <div className="flex items-center gap-2">
@@ -1817,11 +2118,6 @@ function LocalEditorContent() {
                                                                 <InformationCircleIcon className="w-3.5 h-3.5" />
                                                             </button>
                                                         </div>
-                                                        {expandedInfoTips.has('physics') && (
-                                                            <p className="text-[10px] text-white/40 mb-2 ml-5 bg-white/5 rounded p-2">
-                                                                Force-directed layout simulation parameters. Repulsion pushes nodes apart, springs pull connected nodes together, gravity pulls everything to center.
-                                                            </p>
-                                                        )}
                                                         {!collapsedSections.has('physics') && (
                                                         <div className="space-y-1.5 ml-5 mt-1">
                                                             <div className="flex items-center gap-2">
@@ -1889,10 +2185,377 @@ function LocalEditorContent() {
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
                                                             </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Boundary</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="5"
+                                                                    max="200"
+                                                                    step="5"
+                                                                    value={physics.boundaryRadius ?? 50}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, boundaryRadius: Number(e.target.value) })}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.boundaryRadius ?? 50}</span>
+                                                            </div>
                                                         </div>
                                                         )}
                                                     </div>
                                                 )}
+
+                                                {/* === ANALYSIS === */}
+                                                <div className="border-t border-white/10 pt-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => toggleSection('analysis')}
+                                                            className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                        >
+                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('analysis') ? '-rotate-90' : ''}`} />
+                                                            <ChartBarIcon className="w-4 h-4" />
+                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Network Analysis</span>
+                                                            {analysisLoading && (
+                                                                <div className="w-3 h-3 border-2 border-purple-300/30 border-t-purple-300 rounded-full animate-spin" />
+                                                            )}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setExpandedInfoTips(prev => {
+                                                                const next = new Set(prev)
+                                                                next.has('analysisStats') ? next.delete('analysisStats') : next.add('analysisStats')
+                                                                return next
+                                                            })}
+                                                            className="text-white/30 hover:text-white/60"
+                                                        >
+                                                            <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                    {/* Centered Modal Info */}
+                                                    {expandedInfoTips.has('analysisStats') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => {
+                                                                const next = new Set(prev)
+                                                                next.delete('analysisStats')
+                                                                return next
+                                                            })}
+                                                        >
+                                                            <div
+                                                                className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-xl w-full mx-4 max-h-[80vh] overflow-y-auto"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <h2 className="text-lg text-white font-medium mb-3">Network Analysis</h2>
+                                                                <p className="text-sm text-white/60 mb-4">
+                                                                    Analyze the dependency graph structure using graph theory metrics.
+                                                                    Use <strong className="text-white/80">Size Mapping</strong> to visualize node importance,
+                                                                    and <strong className="text-white/80">Color Mapping</strong> to highlight community structure.
+                                                                </p>
+                                                                <div className="space-y-2">
+                                                                    {/* Graph Density */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Graph Density</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$D = \\frac{|E|}{|V| \\cdot (|V| - 1)}$$
+
+where $|E|$ = number of edges, $|V|$ = number of nodes.
+
+Ratio of actual edges to maximum possible edges. Higher = more interconnected.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* PageRank */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">PageRank</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$PR(u) = \\frac{1-d}{N} + d \\sum_{v \\in B_u} \\frac{PR(v)}{L(v)}$$
+
+- $PR(u)$ = PageRank of node $u$
+- $d = 0.85$ = damping factor
+- $N$ = total number of nodes
+- $B_u$ = set of nodes linking to $u$
+- $L(v)$ = outbound links from $v$
+
+A node is important if referenced by other important nodes.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* In-degree */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">In-degree Centrality</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$\\deg^{-}(v) = |\\{u : (u,v) \\in E\\}|$$
+
+Count of incoming edges. High in-degree = widely used/depended upon.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Community Detection */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Community Detection (Louvain)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$Q = \\frac{1}{2m} \\sum_{ij} \\left[ A_{ij} - \\frac{k_i k_j}{2m} \\right] \\delta(c_i, c_j)$$
+
+- $Q$ = modularity $\\in [0,1]$
+- $m$ = total edges
+- $A_{ij}$ = adjacency matrix
+- $k_i, k_j$ = node degrees
+- $\\delta(c_i, c_j)$ = 1 if same community
+
+Groups densely connected nodes. Higher $Q$ = better separation.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">
+                                                                    Click anywhere to close
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {/* Other Info Modals */}
+                                                    {expandedInfoTips.has('hideTechnical') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('hideTechnical'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Hide Technical Nodes</h2>
+                                                                <p className="text-sm text-white/70">Hide auto-generated Lean nodes that are typically implementation details:</p>
+                                                                <ul className="mt-3 text-sm text-white/60 space-y-1 list-disc list-inside">
+                                                                    <li>Type class instances</li>
+                                                                    <li>Coercions</li>
+                                                                    <li>Decidability proofs</li>
+                                                                    <li>Other compiler-generated nodes</li>
+                                                                </ul>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('transitiveReduction') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('transitiveReduction'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Transitive Reduction</h2>
+                                                                <p className="text-sm text-white/70 mb-3">Remove redundant edges to show only essential dependencies.</p>
+                                                                <div className="bg-white/5 rounded-lg p-3 text-sm text-white/60">
+                                                                    <p className="font-medium text-white/80 mb-2">Example:</p>
+                                                                    <p>If path exists: A → B → C</p>
+                                                                    <p>Then hide direct edge: A → C</p>
+                                                                </div>
+                                                                <p className="text-sm text-white/50 mt-3">This reveals the true hierarchical structure of dependencies.</p>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('hideOrphaned') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('hideOrphaned'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Hide Orphaned Nodes</h2>
+                                                                <p className="text-sm text-white/70">Hide nodes that have no connections to other visible nodes.</p>
+                                                                <p className="text-sm text-white/50 mt-3">Useful for cleaning up isolated nodes that don&apos;t contribute to the dependency structure.</p>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('layoutOptimization') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('layoutOptimization'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Layout Optimization</h2>
+                                                                <p className="text-sm text-white/70 mb-3">
+                                                                    Apply additional forces to organize the graph layout beyond basic physics.
+                                                                </p>
+                                                                <ul className="text-sm text-white/60 space-y-2">
+                                                                    <li><strong className="text-white/80">Namespace Clustering:</strong> Group nodes by Lean module hierarchy</li>
+                                                                    <li><strong className="text-white/80">Community Clustering:</strong> Group by detected graph communities (Louvain)</li>
+                                                                    <li><strong className="text-white/80">Adaptive Springs:</strong> Longer edges for high-degree hub nodes</li>
+                                                                </ul>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('clustering') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('clustering'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Namespace Clustering</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Group nodes by their Lean namespace hierarchy. Nodes in the same module cluster together.</p>
+                                                                <MarkdownRenderer content={`**Force Model:**
+
+$$F_{attract} = \\frac{k}{d^2 + 1}$$
+
+$$F_{repel} = \\frac{s}{d^2 + 1}$$
+
+where:
+- $k$ = clustering strength
+- $s$ = cluster separation
+- $d$ = distance to/from centroid
+
+**Depth** controls the namespace level used for grouping (e.g., depth 2 groups \`Mathlib.Algebra\` separately from \`Mathlib.Analysis\`).`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('adaptiveSprings') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('adaptiveSprings'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Adaptive Edge Length</h2>
+                                                                <p className="text-sm text-white/70 mb-4">High-degree hub nodes get longer edges automatically, preventing star-shaped clustering.</p>
+                                                                <MarkdownRenderer content={`**Modes:**
+
+**Square Root** (recommended):
+$$L = L_0 + s \\cdot \\sqrt{\\deg(v)}$$
+
+**Logarithmic** (gentler scaling):
+$$L = L_0 + s \\cdot \\ln(\\deg(v) + 1)$$
+
+**Linear** (aggressive):
+$$L = L_0 + s \\cdot \\deg(v)$$
+
+where:
+- $L$ = final edge length
+- $L_0$ = base edge length
+- $s$ = scale factor
+- $\\deg(v)$ = degree of the hub node`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('communityClustering') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('communityClustering'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Community Clustering</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Group nodes by detected communities (from Louvain algorithm). Similar to namespace clustering but based on graph structure.</p>
+                                                                <MarkdownRenderer content={`**Force Model:**
+
+Same as namespace clustering, but uses community centroids instead of namespace centroids:
+
+$$F_{attract} = \\frac{k}{d^2 + 1}$$
+
+$$F_{repel} = \\frac{s}{d^2 + 1}$$
+
+**Requires** running Network Analysis first to detect communities.`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('physics') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('physics'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Physics Simulation</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Force-directed layout using a physics simulation.</p>
+                                                                <MarkdownRenderer content={`**Forces:**
+
+**Repulsion** (between all nodes):
+$$F_r = \\frac{k_r}{d^2}$$
+
+**Spring** (between connected nodes):
+$$F_s = k_s \\cdot (d - L_0)$$
+
+**Center Gravity**:
+$$F_c = k_c \\cdot d_{center}$$
+
+**Parameters:**
+- *Repulsion*: How strongly nodes push each other apart
+- *Edge Length*: Target distance between connected nodes
+- *Edge Tension*: How strongly edges pull nodes together
+- *Center Gravity*: Pull towards graph center
+- *Damping*: Velocity decay (higher = faster settling)
+- *Boundary*: Maximum distance from center`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {!collapsedSections.has('analysis') && (
+                                                    <div className="ml-5 mt-2 space-y-3">
+                                                        {/* Size Mapping */}
+                                                        <div>
+                                                            <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
+                                                            <div className="flex gap-1 mt-1">
+                                                                {(['default', 'pagerank', 'indegree'] as const).map(mode => (
+                                                                    <button
+                                                                        key={mode}
+                                                                        onClick={() => setSizeMappingMode(mode)}
+                                                                        className={`flex-1 py-1 text-[10px] rounded transition-colors ${
+                                                                            sizeMappingMode === mode
+                                                                                ? 'bg-blue-500/30 text-blue-300'
+                                                                                : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                                                        } ${(mode === 'pagerank' && !analysisData.pagerank) || (mode === 'indegree' && !analysisData.indegree) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={(mode === 'pagerank' && !analysisData.pagerank) || (mode === 'indegree' && !analysisData.indegree)}
+                                                                    >
+                                                                        {mode === 'default' ? 'Default' : mode === 'pagerank' ? 'PageRank' : 'In-deg'}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Color Mapping */}
+                                                        <div>
+                                                            <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
+                                                            <div className="flex gap-1 mt-1">
+                                                                {(['kind', 'community'] as const).map(mode => (
+                                                                    <button
+                                                                        key={mode}
+                                                                        onClick={() => setColorMappingMode(mode)}
+                                                                        className={`flex-1 py-1 text-[10px] rounded transition-colors ${
+                                                                            colorMappingMode === mode
+                                                                                ? 'bg-blue-500/30 text-blue-300'
+                                                                                : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                                                        } ${mode === 'community' && !analysisData.communities ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={mode === 'community' && !analysisData.communities}
+                                                                    >
+                                                                        {mode === 'kind' ? 'Kind' : 'Community'}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Size Contrast slider - only show when PageRank or In-degree is active */}
+                                                        {sizeMappingMode !== 'default' && (
+                                                            <div>
+                                                                <input
+                                                                    type="range"
+                                                                    min="0"
+                                                                    max="1"
+                                                                    step="0.1"
+                                                                    value={sizeContrast}
+                                                                    onChange={(e) => setSizeContrast(parseFloat(e.target.value))}
+                                                                    className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                                                />
+                                                                <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                    <span>Uniform</span>
+                                                                    <span>Contrast</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                    </div>
+                                                    )}
+                                                </div>
 
                                                 {/* === ACTIONS === */}
                                                 <div className="border-t border-white/10 pt-3">
@@ -2007,6 +2670,37 @@ function LocalEditorContent() {
                                     isRemovingNodes={isRemovingNodes}
                                     nodesWithHiddenNeighbors={nodesWithHiddenNeighbors}
                                     getPositionsRef={getPositionsRef}
+                                    nodeCommunities={nodeCommunities}
+                                    onJumpToCode={(filePath, lineNumber) => {
+                                        setCodeLocation({ filePath, lineNumber })
+                                        setCodeViewerOpen(true)
+                                    }}
+                                    onJumpToNamespace={async (namespace) => {
+                                        // Fetch namespace declaration from LSP API
+                                        try {
+                                            const response = await fetch(
+                                                `http://127.0.0.1:8765/api/project/namespace-declaration?` +
+                                                `path=${encodeURIComponent(projectPath)}&namespace=${encodeURIComponent(namespace)}`
+                                            )
+                                            if (response.ok) {
+                                                const data = await response.json()
+                                                console.log('[onJumpToNamespace] LSP result:', namespace, data)
+                                                setCodeLocation({ filePath: data.file_path, lineNumber: data.line_number })
+                                                setCodeViewerOpen(true)
+                                                return
+                                            }
+                                        } catch (error) {
+                                            console.log('[onJumpToNamespace] LSP API failed:', error)
+                                        }
+                                        // Fallback: find first node in namespace
+                                        const firstNode = graphNodes
+                                            .filter(n => n.name.startsWith(namespace + '.') && n.leanFilePath && n.leanLineNumber)
+                                            .sort((a, b) => (a.leanLineNumber || 0) - (b.leanLineNumber || 0))[0]
+                                        if (firstNode?.leanFilePath && firstNode?.leanLineNumber) {
+                                            setCodeLocation({ filePath: firstNode.leanFilePath, lineNumber: firstNode.leanLineNumber })
+                                            setCodeViewerOpen(true)
+                                        }
+                                    }}
                                 />
                             ) : (
                                 <SigmaGraph
@@ -2046,16 +2740,38 @@ function LocalEditorContent() {
                                     )}
                                 </div>
 
+                                {/* LSP button - build/refresh namespace index */}
+                                <button
+                                    onClick={handleBuildLsp}
+                                    disabled={lspBuilding || graphLoading}
+                                    className={`p-1.5 rounded transition-colors disabled:opacity-50 ${
+                                        namespaceIndex.size > 0
+                                            ? 'bg-green-900/60 hover:bg-green-800/60'
+                                            : 'bg-black/60 hover:bg-white/20'
+                                    }`}
+                                    title={namespaceIndex.size > 0
+                                        ? `${namespaceIndex.size} namespaces cached`
+                                        : 'Load LSP'
+                                    }
+                                >
+                                    <span className={`text-xs font-mono ${lspBuilding ? 'animate-pulse' : ''} ${
+                                        namespaceIndex.size > 0 ? 'text-green-400' : 'text-white/60'
+                                    }`}>
+                                        LSP
+                                    </span>
+                                </button>
+
                                 {/* Refresh button */}
                                 <button
-                                    onClick={() => {
+                                    onClick={async () => {
                                         console.log('[Canvas] Refresh clicked')
-                                        reloadGraph()
+                                        await reloadGraph()  // Reload nodes/edges from backend
+                                        loadCanvas()         // Reload canvas state (positions, selected nodes)
                                         setSearchPanelKey(k => k + 1) // Reset SearchPanel state
                                     }}
                                     disabled={graphLoading}
                                     className="p-1.5 bg-black/60 hover:bg-white/20 rounded transition-colors disabled:opacity-50"
-                                    title="Refresh"
+                                    title="Refresh project and canvas"
                                 >
                                     <ArrowPathIcon className={`w-4 h-4 text-white/60 ${graphLoading ? 'animate-spin' : ''}`} />
                                 </button>
@@ -2817,7 +3533,7 @@ function LocalEditorContent() {
                                                                 endLine={codeFile.endLine}
                                                                 totalLines={codeFile.totalLines}
                                                                 nodeName={selectedNode?.name}
-                                                                nodeKind={selectedNode?.type}
+                                                                nodeKind={selectedNode?.id.startsWith('group:') ? 'namespace' : selectedNode?.type}
                                                                 onClose={() => setCodeViewerOpen(false)}
                                                                 hideHeader
                                                                 readOnly
@@ -3121,6 +3837,18 @@ function LocalEditorContent() {
                 onClose={closeLensPicker}
                 nodeCount={canvasNodes.length}
             />
+
+            {/* LSP Status Bar - bottom */}
+            {lspStatus && (
+                <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 border-t border-white/10 px-4 py-2">
+                    <div className="flex items-center gap-2 text-xs text-white/70">
+                        {lspBuilding && (
+                            <div className="w-3 h-3 border-2 border-green-400/30 border-t-green-400 rounded-full animate-spin" />
+                        )}
+                        <span className={lspBuilding ? 'animate-pulse' : ''}>{lspStatus}</span>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

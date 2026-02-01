@@ -38,6 +38,14 @@ const HARMLESS_ERROR_PATTERNS: Array<{
     pattern: 'Script error.',
     description: 'Cross-origin script error with no details - usually harmless',
   },
+  {
+    pattern: '[FileWatch] Error',
+    description: 'FileWatch WebSocket error - expected when backend is not running',
+  },
+  {
+    pattern: 'Computed radius is NaN',
+    description: 'Three.js bounding sphere calculation with invalid data - handled by edge guards',
+  },
 ];
 
 // ============================================

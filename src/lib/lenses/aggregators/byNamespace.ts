@@ -17,6 +17,7 @@ import type {
   NamespaceGroup,
   AggregateResult,
 } from '../types'
+import { getNamespaceBubbleStyle, calculateBubbleSize } from '@/lib/namespaceBubbleStyles'
 
 // ============================================
 // Namespace Extraction
@@ -128,14 +129,20 @@ function groupNodesRecursively(
       // Collapsed - show as a bubble
       // Use last part of namespace as label, with node count
       const shortLabel = getNamespaceLabel(namespace)
+
+      // Get depth-based visual style for this bubble
+      const namespaceDepth = getNamespaceDepth(namespace)
+      const bubbleStyle = getNamespaceBubbleStyle(namespaceDepth - 1)  // -1 because depth 1 = top level
+      const bubbleSize = calculateBubbleSize(nsNodes.length, namespaceDepth - 1)
+
       const bubbleNode: Node = {
         id: groupId,
         name: `${shortLabel}\n(${nsNodes.length})`,  // Show short name + count
         kind: 'custom',
         status: 'unknown',
-        defaultColor: '#a855f7', // Purple for namespace bubbles (matches BUBBLE_COLOR in Node3D)
-        defaultSize: Math.min(3.5, 1.2 + Math.log10(nsNodes.length)), // Slightly larger
-        defaultShape: 'sphere',
+        defaultColor: bubbleStyle.color,
+        defaultSize: bubbleSize,
+        defaultShape: bubbleStyle.shape,
         pinned: false,
         visible: true,
       }
@@ -234,7 +241,7 @@ export const byNamespaceAggregator: LensAggregate = (
   const { options } = context
   const extendedContext = context as ExtendedAggregateContext
   const namespaceDepth = options.namespaceDepth ?? 2
-  const collapseThreshold = options.collapseThreshold ?? 3
+  const collapseThreshold = options.collapseThreshold ?? 1  // Default: always collapse (all namespaces become bubbles)
   const expandedGroups = extendedContext.expandedGroups ?? new Set<string>()
 
   // Handle empty input

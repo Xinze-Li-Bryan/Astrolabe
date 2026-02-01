@@ -14,6 +14,8 @@ import asyncio
 import json
 import time
 
+import networkx as nx
+
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -23,6 +25,24 @@ from watchfiles import awatch
 from .project import Project
 from .graph_cache import GraphCache
 from .unified_storage import UnifiedStorage
+from .analysis import (
+    build_networkx_graph,
+    compute_degree_statistics,
+    compute_pagerank,
+    compute_betweenness_centrality,
+    detect_communities_louvain,
+    compute_clustering_coefficients,
+    compute_von_neumann_entropy,
+    compute_structure_entropy,
+)
+from .analysis.entropy import random_graph_baseline
+from .analysis.degree import compute_degree_shannon_entropy
+from .lean_lsp import LeanLSPClient, NamespaceInfo
+from .lsp_cache import (
+    LSPCache,
+    get_lsp_cache_path,
+    build_lsp_cache,
+)
 
 
 # Project cache
@@ -509,6 +529,283 @@ async def search_nodes(
         del r["score"]
 
     return {"results": results, "total": len(results)}
+
+
+# ============================================
+# Namespace API
+# ============================================
+
+# Cache for LSP clients (one per project)
+_lsp_clients: dict[str, LeanLSPClient] = {}
+# Cache for namespace info (per file, not whole project)
+_namespace_file_cache: dict[str, dict[str, NamespaceInfo]] = {}
+
+
+async def _get_or_create_lsp_client(project_path: str) -> LeanLSPClient:
+    """Get or create an LSP client for the project"""
+    if project_path not in _lsp_clients:
+        client = LeanLSPClient(Path(project_path))
+        await client.start()
+        _lsp_clients[project_path] = client
+    return _lsp_clients[project_path]
+
+
+async def _get_namespaces_for_file(project_path: str, file_path: str) -> dict[str, NamespaceInfo]:
+    """Get namespaces from a specific file, using cache"""
+    cache_key = file_path
+    if cache_key in _namespace_file_cache:
+        return _namespace_file_cache[cache_key]
+
+    client = await _get_or_create_lsp_client(project_path)
+    namespaces = await client.get_namespaces(Path(file_path))
+    _namespace_file_cache[cache_key] = namespaces
+    return namespaces
+
+
+def _find_file_for_namespace(project: Project, namespace: str) -> Optional[str]:
+    """Find the file that contains nodes in this namespace"""
+    # Look for nodes that start with "namespace." or equal "namespace"
+    # Use node.name which matches how frontend extracts namespaces
+    prefix = namespace + "."
+
+    # Find earliest node (by line number) in this namespace
+    best_file = None
+    best_line = float('inf')
+
+    for node in project.nodes.values():
+        if node.name.startswith(prefix) or node.name == namespace:
+            if node.file_path and node.line_number:
+                if node.line_number < best_line:
+                    best_line = node.line_number
+                    best_file = node.file_path
+
+    return best_file
+
+
+@app.get("/api/project/namespace-declaration")
+async def get_namespace_declaration(
+    path: str = Query(..., description="Project path"),
+    namespace: str = Query(..., description="Namespace name (e.g., 'Chapter11' or 'Foo.Bar')"),
+):
+    """
+    Get the declaration location for a namespace.
+
+    Returns the file path and line number where the namespace is declared.
+    This is useful for "Jump to Code" functionality when clicking namespace bubbles.
+
+    Priority:
+    1. Check namespace_index.json (fast, pre-computed)
+    2. Fall back to LSP query (slower, but always accurate)
+
+    Returns:
+        {
+            "name": "Chapter11",
+            "file_path": "/path/to/file.lean",
+            "line_number": 19,
+            "is_explicit": true
+        }
+    """
+    # First, try to get from cached namespace index (fast path)
+    cache_path = get_lsp_cache_path(Path(path))
+    cache = LSPCache.load(cache_path)
+    index = cache.namespaces
+
+    if namespace in index:
+        return {"name": namespace, **index[namespace]}
+
+    # Fall back to LSP query (slow path)
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    # Find which file contains this namespace
+    file_path = _find_file_for_namespace(project, namespace)
+    if not file_path:
+        raise HTTPException(404, f"Namespace not found: {namespace}")
+
+    try:
+        # Get namespaces from that file
+        namespaces = await _get_namespaces_for_file(path, file_path)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get namespaces: {e}")
+
+    if namespace not in namespaces:
+        # Namespace might be implicit, return fallback based on first node
+        # Use node.name which matches how frontend extracts namespaces
+        for node in project.nodes.values():
+            if node.name.startswith(namespace + ".") and node.file_path and node.line_number:
+                return {
+                    "name": namespace,
+                    "file_path": node.file_path,
+                    "line_number": node.line_number,
+                    "is_explicit": False
+                }
+        raise HTTPException(404, f"Namespace not found: {namespace}")
+
+    return namespaces[namespace].to_dict()
+
+
+@app.get("/api/project/namespaces")
+async def get_all_namespaces_endpoint(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Get unique namespaces from the project's nodes.
+
+    This is a fast operation that extracts namespaces from existing node names,
+    without scanning all files via LSP.
+
+    Returns:
+        {
+            "namespaces": [
+                {"name": "Chapter11", "file_path": "...", "line_number": 19},
+                ...
+            ]
+        }
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    # Extract unique namespaces from node names
+    namespace_info: dict[str, dict] = {}
+
+    for node in project.nodes.values():
+        # Get namespace prefix from node name
+        if "." in node.name:
+            parts = node.name.rsplit(".", 1)
+            ns_name = parts[0]
+
+            # Track earliest occurrence
+            if ns_name not in namespace_info:
+                namespace_info[ns_name] = {
+                    "name": ns_name,
+                    "file_path": node.file_path,
+                    "line_number": node.line_number,
+                    "is_explicit": None  # Unknown without LSP
+                }
+            elif node.file_path and node.line_number:
+                existing = namespace_info[ns_name]
+                if existing["line_number"] is None or node.line_number < existing["line_number"]:
+                    namespace_info[ns_name]["file_path"] = node.file_path
+                    namespace_info[ns_name]["line_number"] = node.line_number
+
+    return {
+        "namespaces": list(namespace_info.values())
+    }
+
+
+@app.post("/api/project/namespaces/refresh")
+async def refresh_namespace_cache(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Clear namespace cache for a project.
+
+    Call this after significant code changes to update namespace info.
+    """
+    # Clear file caches for this project
+    keys_to_remove = [k for k in _namespace_file_cache.keys() if k.startswith(path)]
+    for key in keys_to_remove:
+        del _namespace_file_cache[key]
+
+    # Stop and remove old LSP client
+    if path in _lsp_clients:
+        await _lsp_clients[path].stop()
+        del _lsp_clients[path]
+
+    return {"status": "ok"}
+
+
+# ============================================
+# Namespace Index API (persistent cache)
+# ============================================
+
+
+@app.get("/api/project/namespace-index")
+async def get_namespace_index(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Get the cached LSP information for fast lookups.
+
+    Returns the namespace index from .astrolabe/lsp.json.
+    If the cache doesn't exist, returns an empty list.
+
+    Returns:
+        {
+            "namespaces": [
+                {"name": "Foo", "file_path": "...", "line_number": 10, "is_explicit": true},
+                ...
+            ],
+            "version": 2,
+            "built_at": "2026-02-01T16:00:00Z"
+        }
+    """
+    cache_path = get_lsp_cache_path(Path(path))
+    cache = LSPCache.load(cache_path)
+
+    # Convert dict to list format for frontend
+    namespaces = [
+        {"name": ns_name, **info}
+        for ns_name, info in cache.namespaces.items()
+    ]
+
+    return {
+        "namespaces": namespaces,
+        "version": cache.version,
+        "built_at": cache.built_at,
+        "file_count": len(cache.files),
+    }
+
+
+@app.post("/api/project/namespace-index/build")
+async def build_namespace_index_endpoint(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Build and save the complete LSP cache.
+
+    This scans all files in the project using the Lean LSP and collects:
+    - Document symbols (all declarations with hierarchy)
+    - Diagnostics (errors, warnings)
+    - Namespace index (extracted from symbols for fast lookup)
+
+    The result is saved to .astrolabe/lsp.json for fast future lookups.
+    This operation may take some time for large projects.
+
+    Returns:
+        {"status": "ok", "count": 123, "file_count": 45}
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    # Collect unique file paths from nodes
+    file_paths = set()
+    for node in project.nodes.values():
+        if node.file_path:
+            file_paths.add(node.file_path)
+
+    # Build complete LSP cache
+    cache = await build_lsp_cache(Path(path), list(file_paths))
+
+    # Save to file
+    cache_path = get_lsp_cache_path(Path(path))
+    cache.save(cache_path)
+
+    return {
+        "status": "ok",
+        "count": len(cache.namespaces),
+        "file_count": len(cache.files),
+        "built_at": cache.built_at,
+    }
 
 
 # ============================================
@@ -1376,6 +1673,422 @@ async def watch_project(websocket: WebSocket, path: str = Query(...)):
             })
         except:
             pass
+
+
+# ============================================
+# Network Analysis API
+# ============================================
+
+
+# Cache for NetworkX graphs (avoid rebuilding on every request)
+_graph_cache: dict[str, tuple[nx.DiGraph, float]] = {}  # path -> (graph, timestamp)
+GRAPH_CACHE_TTL = 60  # seconds
+
+
+def _get_or_build_graph(project: Project) -> nx.DiGraph:
+    """Get cached NetworkX graph or build a new one"""
+    import time as time_module
+    path = project.path
+    now = time_module.time()
+
+    # Check cache
+    if path in _graph_cache:
+        cached_graph, timestamp = _graph_cache[path]
+        if now - timestamp < GRAPH_CACHE_TTL:
+            return cached_graph
+
+    # Build new graph
+    nodes = list(project.nodes.values())
+    edges = project.edges
+    G = build_networkx_graph(nodes, edges, directed=True)
+
+    # Cache it
+    _graph_cache[path] = (G, now)
+    return G
+
+
+@app.get("/api/project/analysis/degree")
+async def get_degree_analysis(
+    path: str = Query(..., description="Project path"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+):
+    """
+    Get degree distribution analysis for the project graph.
+
+    Returns:
+        - inDegree: Incoming edge statistics (how many dependencies each node has)
+        - outDegree: Outgoing edge statistics (how many nodes depend on each)
+        - totalDegree: Combined degree statistics
+        - topInDegree: Nodes with most incoming edges (most dependencies)
+        - topOutDegree: Nodes with most outgoing edges (most depended upon)
+        - shannonEntropy: Entropy of the degree distribution
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    stats = compute_degree_statistics(G, top_k=top_k)
+
+    return {
+        "status": "ok",
+        "analysis": "degree",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": stats.to_dict(),
+    }
+
+
+@app.get("/api/project/analysis/pagerank")
+async def get_pagerank_analysis(
+    path: str = Query(..., description="Project path"),
+    alpha: float = Query(0.85, description="Damping factor (0-1)"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_all: bool = Query(False, description="Include all node values (can be large)"),
+):
+    """
+    Get PageRank centrality analysis for the project graph.
+
+    PageRank identifies the most "important" nodes based on link structure.
+    In Lean projects, high PageRank indicates foundational theorems/lemmas
+    that are referenced by many other important results.
+
+    Args:
+        path: Project path
+        alpha: Damping factor (default 0.85, higher = more weight on link structure)
+        top_k: Number of top nodes to return
+        include_all: If True, include centrality values for all nodes
+
+    Returns:
+        - topNodes: List of top k nodes by PageRank
+        - mean: Mean PageRank value
+        - maxValue: Maximum PageRank value
+        - minValue: Minimum PageRank value
+        - values: (optional) All node PageRank values
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = compute_pagerank(G, alpha=alpha, top_k=top_k)
+
+    response_data = {
+        "topNodes": [{"nodeId": n, "value": v} for n, v in result.top_nodes],
+        "mean": result.mean,
+        "maxValue": result.max_value,
+        "minValue": result.min_value,
+    }
+
+    if include_all:
+        response_data["values"] = result.values
+
+    return {
+        "status": "ok",
+        "analysis": "pagerank",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "alpha": alpha,
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/betweenness")
+async def get_betweenness_analysis(
+    path: str = Query(..., description="Project path"),
+    k: int = Query(1000, description="Number of samples for approximation (0 = exact)"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_all: bool = Query(False, description="Include all node values (can be large)"),
+):
+    """
+    Get Betweenness centrality analysis for the project graph.
+
+    Betweenness measures how often a node lies on shortest paths between other nodes.
+    High betweenness indicates "bridge" nodes that connect different parts of the graph.
+
+    In Lean projects, high betweenness indicates lemmas that bridge different
+    mathematical domains - "connector" results that link different areas.
+
+    Args:
+        path: Project path
+        k: Number of random samples for approximation (default 1000, 0 = exact calculation)
+        top_k: Number of top nodes to return
+        include_all: If True, include centrality values for all nodes
+
+    Returns:
+        - topNodes: List of top k nodes by betweenness
+        - mean: Mean betweenness value
+        - maxValue: Maximum betweenness value
+        - minValue: Minimum betweenness value
+        - values: (optional) All node betweenness values
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    # k=0 means exact calculation
+    sample_k = k if k > 0 else None
+    result = compute_betweenness_centrality(G, k=sample_k, top_k=top_k)
+
+    response_data = {
+        "topNodes": [{"nodeId": n, "value": v} for n, v in result.top_nodes],
+        "mean": result.mean,
+        "maxValue": result.max_value,
+        "minValue": result.min_value,
+    }
+
+    if include_all:
+        response_data["values"] = result.values
+
+    return {
+        "status": "ok",
+        "analysis": "betweenness",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "sampled": sample_k is not None,
+        "sampleSize": sample_k,
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/communities")
+async def get_community_detection(
+    path: str = Query(..., description="Project path"),
+    resolution: float = Query(1.0, description="Resolution parameter (higher = more communities)"),
+    include_partition: bool = Query(False, description="Include full node->community mapping"),
+    include_members: bool = Query(True, description="Include community member lists"),
+    top_k: int = Query(10, description="Number of top communities to show members for"),
+):
+    """
+    Detect communities using the Louvain algorithm.
+
+    Communities are groups of densely connected nodes. In Lean projects,
+    they represent clusters of related mathematical concepts.
+
+    Args:
+        path: Project path
+        resolution: Higher = more smaller communities, lower = fewer larger communities
+        include_partition: If True, include full node->community_id mapping
+        include_members: If True, include member lists for top communities
+        top_k: Number of top communities to include member lists for
+
+    Returns:
+        - numCommunities: Total number of communities found
+        - modularity: Quality score (0-1, higher = better separation)
+        - sizes: List of community sizes (sorted descending)
+        - communities: (optional) Top k communities with member lists
+        - partition: (optional) Full node->community_id mapping
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = detect_communities_louvain(G, resolution=resolution)
+
+    # Build response
+    response_data = {
+        "numCommunities": result.num_communities,
+        "modularity": result.modularity,
+        "sizes": result.sizes,
+    }
+
+    # Include top k communities with members
+    if include_members:
+        # Sort communities by size
+        sorted_communities = sorted(
+            result.communities.items(),
+            key=lambda x: len(x[1]),
+            reverse=True
+        )
+        top_communities = []
+        for comm_id, members in sorted_communities[:top_k]:
+            top_communities.append({
+                "id": comm_id,
+                "size": len(members),
+                "members": members,
+            })
+        response_data["topCommunities"] = top_communities
+
+    if include_partition:
+        response_data["partition"] = result.partition
+
+    return {
+        "status": "ok",
+        "analysis": "communities",
+        "algorithm": "louvain",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "resolution": resolution,
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/clustering")
+async def get_clustering_analysis(
+    path: str = Query(..., description="Project path"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_local: bool = Query(False, description="Include all local coefficients (can be large)"),
+    include_namespaces: bool = Query(True, description="Include clustering by namespace"),
+):
+    """
+    Get clustering coefficient analysis for the project graph.
+
+    The clustering coefficient measures how much nodes tend to cluster together.
+    - Global (transitivity): Fraction of possible triangles that exist
+    - Local: For each node, what fraction of its neighbors are also connected
+    - By namespace: Average clustering within each namespace
+
+    In Lean projects, high clustering indicates tightly interconnected groups
+    of lemmas representing cohesive mathematical topics.
+
+    Args:
+        path: Project path
+        top_k: Number of top clustered nodes to return
+        include_local: If True, include local coefficients for all nodes
+        include_namespaces: If True, include clustering breakdown by namespace
+
+    Returns:
+        - globalCoefficient: Graph-wide transitivity
+        - averageCoefficient: Mean of local coefficients
+        - topNodes: Nodes with highest local clustering
+        - byNamespace: (optional) Average clustering per namespace
+        - local: (optional) All local coefficients
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = compute_clustering_coefficients(G, include_local=True)
+
+    # Get top-k nodes by local clustering (filter out nodes with degree < 2)
+    G_undirected = G.to_undirected() if G.is_directed() else G
+    degrees = dict(G_undirected.degree())
+
+    # Sort nodes by clustering, filter by min degree
+    sorted_nodes = sorted(
+        [(n, c) for n, c in result.local.items() if degrees.get(n, 0) >= 2],
+        key=lambda x: x[1],
+        reverse=True
+    )
+    top_nodes = [{"nodeId": n, "value": c, "degree": degrees.get(n, 0)}
+                 for n, c in sorted_nodes[:top_k]]
+
+    # Build response
+    response_data = {
+        "globalCoefficient": result.global_coefficient,
+        "averageCoefficient": result.average_coefficient,
+        "topNodes": top_nodes,
+    }
+
+    if include_namespaces:
+        # Sort namespaces by clustering coefficient
+        sorted_ns = sorted(
+            result.by_namespace.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        response_data["byNamespace"] = [
+            {"namespace": ns, "avgClustering": c, "nodeCount": sum(1 for n in result.local if n.startswith(ns + "."))}
+            for ns, c in sorted_ns[:50]  # Top 50 namespaces
+        ]
+
+    if include_local:
+        response_data["local"] = result.local
+
+    return {
+        "status": "ok",
+        "analysis": "clustering",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/entropy")
+async def get_project_entropy(
+    path: str = Query(..., description="Project path"),
+    num_eigenvalues: int = Query(100, description="Number of eigenvalues for Von Neumann entropy"),
+    random_samples: int = Query(5, description="Number of random graph samples for baseline"),
+):
+    """
+    Compute entropy metrics for the project's dependency graph.
+
+    Returns:
+        - vonNeumann: Von Neumann entropy (based on graph Laplacian)
+        - shannon: Shannon entropy (based on degree distribution)
+        - effectiveDimension: exp(Von Neumann entropy)
+        - randomBaseline: Entropy of equivalent random graph (same n, m)
+        - normalizedEntropy: Von Neumann entropy / random baseline entropy
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    n = G.number_of_nodes()
+    m = G.number_of_edges()
+
+    # Compute Von Neumann entropy
+    vn_result = compute_von_neumann_entropy(G, num_eigenvalues=num_eigenvalues)
+    vn_entropy = vn_result["vonNeumannEntropy"]
+    vn_effective_dim = vn_result["effectiveDimension"]
+    vn_num_eigenvalues = len(vn_result["eigenvalues"])
+
+    # Compute Shannon entropy from degree distribution
+    shannon_entropy = compute_degree_shannon_entropy(G)
+
+    # Compute random graph baseline
+    baseline = random_graph_baseline(n, m, num_samples=random_samples)
+    baseline_vn_mean = baseline["vonNeumann"]["mean"]
+    baseline_vn_std = baseline["vonNeumann"]["std"]
+
+    # Normalized entropy (compared to random graph)
+    normalized = vn_entropy / baseline_vn_mean if baseline_vn_mean > 0 else 0.0
+
+    return {
+        "status": "ok",
+        "analysis": "entropy",
+        "numNodes": n,
+        "numEdges": m,
+        "data": {
+            "vonNeumann": {
+                "entropy": vn_entropy,
+                "numEigenvalues": vn_num_eigenvalues,
+                "effectiveDimension": vn_effective_dim,
+            },
+            "shannon": {
+                "entropy": shannon_entropy,
+                "description": "Entropy of degree distribution",
+            },
+            "randomBaseline": {
+                "meanEntropy": baseline_vn_mean,
+                "stdEntropy": baseline_vn_std,
+                "numSamples": baseline["numSamples"],
+            },
+            "normalizedEntropy": normalized,
+            "interpretation": (
+                "low" if normalized < 0.8 else
+                "medium" if normalized < 1.2 else
+                "high"
+            ),
+        },
+    }
 
 
 # ============================================

@@ -71,9 +71,6 @@ interface Node3DProps {
 // Red color in remove mode
 const REMOVE_COLOR = '#ff4444'
 
-// Purple color for namespace bubbles
-const BUBBLE_COLOR = '#a855f7'
-
 // Node types that require status ring (consistent with backend PROOF_REQUIRING_KINDS)
 const PROOF_REQUIRING_KINDS = ['theorem', 'lemma', 'proposition', 'corollary']
 
@@ -401,38 +398,16 @@ export const Node3D = memo(function Node3D({
         </group>
       )}
 
-      {/* Bubble node glow - prominent purple glow for namespace bubbles (right-click to expand/collapse) */}
+      {/* Bubble node glow - subtle glow for namespace bubbles (right-click to expand/collapse) */}
       {isBubble && !isSelected && !isDimmed && (
         <group ref={bubbleGlowRef}>
-          {/* Inner glow - brightest */}
+          {/* Single subtle glow layer */}
           <mesh>
-            <sphereGeometry args={[size * 2.0, 12, 8]} />
+            <sphereGeometry args={[size * 1.3, 10, 6]} />
             <meshBasicMaterial
-              color={BUBBLE_COLOR}
+              color={color}
               transparent
-              opacity={0.5}
-              blending={THREE.AdditiveBlending}
-              depthWrite={false}
-            />
-          </mesh>
-          {/* Middle glow */}
-          <mesh>
-            <sphereGeometry args={[size * 3.0, 10, 6]} />
-            <meshBasicMaterial
-              color={BUBBLE_COLOR}
-              transparent
-              opacity={0.3}
-              blending={THREE.AdditiveBlending}
-              depthWrite={false}
-            />
-          </mesh>
-          {/* Outer glow - faintest, creates a halo effect */}
-          <mesh>
-            <sphereGeometry args={[size * 4.5, 8, 6]} />
-            <meshBasicMaterial
-              color={BUBBLE_COLOR}
-              transparent
-              opacity={0.15}
+              opacity={0.25}
               blending={THREE.AdditiveBlending}
               depthWrite={false}
             />

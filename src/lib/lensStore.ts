@@ -53,7 +53,7 @@ export const useLensStore = create<LensStoreState>((set, get) => ({
   options: {
     nHop: 2,
     namespaceDepth: 2,        // Group by 2nd level (e.g., "Mathlib.Algebra")
-    collapseThreshold: 3,     // Lower threshold for more grouping
+    collapseThreshold: 1,     // Always collapse - all namespaces become bubbles
   },
   expandedGroups: new Set(),
 

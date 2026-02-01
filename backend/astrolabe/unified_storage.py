@@ -203,6 +203,58 @@ class UnifiedStorage:
         self._save_meta()
         return True
 
+    def sync_lsp_statuses(self, statuses: dict[str, str]) -> None:
+        """
+        Sync LSP-derived proof statuses to meta.json
+
+        Args:
+            statuses: Dict mapping node_id to status ("sorry", "error", "proven")
+        """
+        for node_id, status in statuses.items():
+            if node_id not in self._meta["nodes"]:
+                self._meta["nodes"][node_id] = {}
+            self._meta["nodes"][node_id]["lsp_status"] = status
+
+        self._save_meta()
+
+    def sync_from_lsp_cache(self, lsp_cache_path) -> None:
+        """
+        Sync all node statuses from an LSP cache file to meta.json
+
+        Args:
+            lsp_cache_path: Path to lsp.json file
+        """
+        from .lsp_cache import LSPCache
+
+        cache = LSPCache.load(lsp_cache_path)
+
+        # Collect all node statuses from all files
+        all_statuses = {}
+        for file_path, file_data in cache.files.items():
+            node_statuses = file_data.get("node_statuses", {})
+            all_statuses.update(node_statuses)
+
+        self.sync_lsp_statuses(all_statuses)
+
+    def get_effective_status(self, node_id: str, graph_status: str) -> str:
+        """
+        Get effective proof status for a node.
+        LSP status takes priority over graph.json status.
+
+        Args:
+            node_id: Node ID
+            graph_status: Status from graph.json (fallback)
+
+        Returns:
+            Effective status string
+        """
+        node_meta = self._meta["nodes"].get(node_id, {})
+        lsp_status = node_meta.get("lsp_status")
+
+        if lsp_status:
+            return lsp_status
+        return graph_status
+
     def delete_node(self, node_id: str) -> bool:
         """
         Delete node

@@ -74,6 +74,9 @@ interface ForceGraph3DProps {
   isRemovingNodes?: boolean  // Remove mode
   nodesWithHiddenNeighbors?: Set<string>  // Nodes that have hidden dependencies/dependents
   getPositionsRef?: React.MutableRefObject<(() => Map<string, [number, number, number]>) | null>  // Ref to get current positions
+  nodeCommunities?: Map<string, number> | null  // Node community assignments for community-aware layout
+  onJumpToCode?: (filePath: string, lineNumber: number) => void  // Jump to code location
+  onJumpToNamespace?: (namespace: string) => void  // Jump to namespace declaration (via LSP)
 }
 
 // Camera focus control
@@ -482,6 +485,7 @@ function GraphScene({
   activeLensId = 'full',
   lensFocusNodeId = null,
   onNodeContextMenu,
+  nodeCommunities,
 }: {
   nodes: Node[]
   edges: Edge[]
@@ -511,27 +515,20 @@ function GraphScene({
   activeLensId?: string
   lensFocusNodeId?: string | null
   onNodeContextMenu?: (node: Node, clientX: number, clientY: number) => void
+  nodeCommunities?: Map<string, number> | null
 }) {
-  // Get lens actions for bubble expansion
-  const { toggleGroupExpanded } = useLensActions()
-
-  // Handler that intercepts bubble clicks to toggle expansion instead of selecting
-  // This avoids expensive edge highlight computation for bubble nodes
+  // Handler for node selection
+  // Bubble left-click: just select/focus (don't expand - use right-click context menu for that)
   const handleNodeSelectWithBubble = useCallback((node: Node | null) => {
     if (!node) {
       onNodeSelect(null)
       return
     }
 
-    // Bubble left-click: toggle expansion (fast path, no edge highlighting)
-    if (node.id.startsWith('group:')) {
-      toggleGroupExpanded(node.id)
-      return
-    }
-
-    // Normal node: proceed with selection
+    // All nodes (including bubbles): proceed with selection
+    // Bubble expansion is handled via right-click context menu
     onNodeSelect(node)
-  }, [toggleGroupExpanded, onNodeSelect])
+  }, [onNodeSelect])
 
   // Node focus
   const focusPosition = focusNodeId ? positionsRef.current.get(focusNodeId) || null : null
@@ -712,6 +709,7 @@ function GraphScene({
           onStable={onStable}
           onWarmupComplete={onWarmupComplete}
           controlsRef={controlsRef}
+          nodeCommunities={nodeCommunities}
         />
       )}
 
@@ -876,6 +874,9 @@ export function ForceGraph3D({
   isRemovingNodes = false,
   nodesWithHiddenNeighbors,
   getPositionsRef,
+  nodeCommunities,
+  onJumpToCode,
+  onJumpToNamespace,
 }: ForceGraph3DProps) {
   const positionsRef = useRef<Map<string, [number, number, number]>>(new Map())
 
@@ -978,6 +979,10 @@ export function ForceGraph3D({
   // Track previous node IDs to detect changes
   const prevNodeIdsRef = useRef<Set<string>>(new Set())
 
+  // Track previous groups to detect bubble expansions
+  // When a bubble is expanded, we need to spawn its children from the bubble's position
+  const prevGroupsRef = useRef<Map<string, { nodeIds: string[]; expanded: boolean }>>(new Map())
+
   // Get saved positions from canvasStore
   const canvasPositions = useCanvasStore((state) => state.positions)
 
@@ -987,26 +992,58 @@ export function ForceGraph3D({
     return allNodes.filter(n => canvasPositions[n.id]).length
   }, [allNodes, canvasPositions])
 
+  // Track previous LENSED node IDs to detect visibility changes
+  // (allNodes doesn't change when bubbles expand/collapse, only lensedNodes does)
+  const prevLensedNodeIdsRef = useRef<Set<string>>(new Set())
+
   // Initialize node positions (including custom nodes)
   // Use nodeLifecycle module for intelligent position calculation
   useEffect(() => {
     if (allNodes.length === 0) {
       positionsRef.current.clear()
       prevNodeIdsRef.current.clear()
+      prevLensedNodeIdsRef.current.clear()
+      prevGroupsRef.current.clear()
       return
     }
 
     const currentIds = new Set(allNodes.map(n => n.id))
+    const currentLensedIds = new Set(lensedNodes.map(n => n.id))
 
-    // Detect node changes
+    // Detect node changes in raw data
     const { added, removed } = detectNodeChanges(prevNodeIdsRef.current, currentIds)
+
+    // Detect VISIBILITY changes in lensed nodes (for bubble expand/collapse)
+    const { added: becameVisible } = detectNodeChanges(prevLensedNodeIdsRef.current, currentLensedIds)
+
+    // Detect bubble expansions - find groups that just changed from collapsed to expanded
+    // We need to capture the bubble's position BEFORE removing it from positionsRef
+    const expansionOrigins = new Map<string, LifecyclePosition3D>()
+    for (const group of lensedGroups) {
+      const prevGroup = prevGroupsRef.current.get(group.id)
+      // Check if this group just got expanded (was collapsed before, now expanded)
+      if (group.expanded && prevGroup && !prevGroup.expanded) {
+        // Get the bubble's position before it gets removed
+        const bubblePos = positionsRef.current.get(group.id)
+        if (bubblePos) {
+          // Map all nodes in this group to spawn from the bubble's position
+          // Check against becameVisible (lensed visibility) not added (raw data)
+          for (const nodeId of group.nodeIds) {
+            if (becameVisible.includes(nodeId)) {
+              expansionOrigins.set(nodeId, bubblePos)
+            }
+          }
+          console.log(`[ForceGraph3D] Bubble expanded: ${group.id}, spawning ${expansionOrigins.size} nodes from position`, bubblePos)
+        }
+      }
+    }
 
     // Delete non-existent nodes
     for (const id of removed) {
       positionsRef.current.delete(id)
     }
 
-    // If there are new nodes, use intelligent position calculation
+    // If there are new nodes in raw data, use intelligent position calculation
     if (added.length > 0) {
       // Read saved positions from canvasStore.positions (3D: {x, y, z})
       const savedPositions = new Map<string, LifecyclePosition3D | undefined>()
@@ -1042,60 +1079,205 @@ export function ForceGraph3D({
       }
     }
 
+    // Handle nodes that became visible due to bubble expansion
+    // These need positions seeded from the bubble's location
+    if (expansionOrigins.size > 0) {
+      // Get existing node positions for context
+      const existingPositions = new Map<string, LifecyclePosition3D>()
+      for (const [id, pos] of positionsRef.current.entries()) {
+        existingPositions.set(id, pos)
+      }
+
+      // For nodes with expansion origins, calculate positions spreading from the bubble
+      const savedPositions = new Map<string, LifecyclePosition3D | undefined>()
+      for (const id of becameVisible) {
+        // Don't use saved positions for expansion - we want them to start at bubble
+        savedPositions.set(id, undefined)
+      }
+
+      const newPositions = calculateBatchSpawnPositions(
+        becameVisible,
+        savedPositions,
+        existingPositions,
+        allEdges,
+        expansionOrigins
+      )
+
+      // Apply new positions
+      for (const [id, pos] of newPositions.entries()) {
+        positionsRef.current.set(id, pos)
+      }
+    }
+
     // Update tracked node IDs
     prevNodeIdsRef.current = currentIds
-  }, [allNodes, allEdges, canvasPositions])
+    prevLensedNodeIdsRef.current = currentLensedIds
+
+    // Update tracked groups for next comparison
+    const newGroupsMap = new Map<string, { nodeIds: string[]; expanded: boolean }>()
+    for (const group of lensedGroups) {
+      newGroupsMap.set(group.id, { nodeIds: group.nodeIds, expanded: group.expanded })
+    }
+    prevGroupsRef.current = newGroupsMap
+  }, [allNodes, allEdges, canvasPositions, lensedGroups, lensedNodes])
 
   // Seed positions for bubble nodes (synthetic namespace groups)
   // Bubbles aren't in allNodes, so they don't get positions from the main effect
-  // Spread bubbles in a circle/sphere pattern based on index for good initial separation
-  // This runs synchronously during render to ensure bubbles have positions before first paint
-  const bubblePositionsSeeded = useMemo(() => {
-    if (lensedGroups.length === 0) return 0
+  // This effect runs when groups change and ensures all bubbles have valid positions
+  const prevGroupKeyRef = useRef<string>('')
 
-    // Get collapsed groups only
-    const collapsedGroups = lensedGroups.filter(g => !g.expanded && !positionsRef.current.has(g.id))
-    if (collapsedGroups.length === 0) return 0
+  useEffect(() => {
+    if (lensedGroups.length === 0) return
 
-    // Spread bubbles in a sphere pattern for good initial separation
-    // Use larger radius so bubbles aren't clustered together
-    const radius = Math.max(40, collapsedGroups.length * 4) // Scale radius with count
+    // Get all collapsed groups (bubbles)
+    const collapsedGroups = lensedGroups.filter(g => !g.expanded)
+    if (collapsedGroups.length === 0) return
 
-    let seededCount = 0
-    for (let i = 0; i < collapsedGroups.length; i++) {
-      const group = collapsedGroups[i]
+    // Create a key to detect if groups changed
+    const groupKey = collapsedGroups.map(g => g.id).sort().join(',')
+    const groupsChanged = groupKey !== prevGroupKeyRef.current
+
+    // Check for bubbles that were just collapsed (user action, not initial load)
+    // These should be positioned at the centroid of their child nodes
+    for (const group of collapsedGroups) {
+      const prevGroup = prevGroupsRef.current.get(group.id)
+      // ONLY use centroid when user explicitly collapsed an expanded group
+      // On initial load, prevGroup won't exist, so we'll use sphere seeding instead
+      const justCollapsed = prevGroup && prevGroup.expanded && !group.expanded
+
+      if (justCollapsed) {
+        // Calculate centroid from child node positions
+        let cx = 0, cy = 0, cz = 0, count = 0
+        for (const nodeId of group.nodeIds) {
+          const pos = positionsRef.current.get(nodeId)
+          if (pos) {
+            cx += pos[0]
+            cy += pos[1]
+            cz += pos[2]
+            count++
+          }
+        }
+
+        if (count > 0) {
+          // Position bubble at centroid of its children
+          positionsRef.current.set(group.id, [cx / count, cy / count, cz / count])
+          console.log(`[ForceGraph3D] Collapsed bubble ${group.id} at centroid of ${count} nodes`)
+          continue // Skip the default seeding for this bubble
+        }
+      }
+    }
+
+    // Count how many bubbles are still missing positions
+    let missingCount = 0
+    const existingPositions: [number, number, number][] = []
+    for (const group of collapsedGroups) {
+      const pos = positionsRef.current.get(group.id)
+      if (!pos || Number.isNaN(pos[0])) {
+        missingCount++
+      } else {
+        existingPositions.push(pos)
+      }
+    }
+
+    // Check if positions are clustered (all at same location)
+    let isClustered = false
+    if (existingPositions.length > 5) {
+      let totalDist = 0
+      let count = 0
+      for (let i = 0; i < Math.min(existingPositions.length, 20); i++) {
+        for (let j = i + 1; j < Math.min(existingPositions.length, 20); j++) {
+          const dx = existingPositions[i][0] - existingPositions[j][0]
+          const dy = existingPositions[i][1] - existingPositions[j][1]
+          const dz = existingPositions[i][2] - existingPositions[j][2]
+          totalDist += Math.sqrt(dx * dx + dy * dy + dz * dz)
+          count++
+        }
+      }
+      const avgDist = count > 0 ? totalDist / count : 0
+      if (avgDist < 5) {
+        isClustered = true
+        console.log(`[ForceGraph3D] Bubbles are clustered (avgDist=${avgDist.toFixed(1)})`)
+      }
+    }
+
+    // Determine if we need to seed/reseed
+    // - missingCount > 0: Some bubbles have no position yet (initial load or new bubbles)
+    // - isClustered: All bubbles are at the same position (needs spreading)
+    const needsSeed = missingCount > 0 || isClustered
+
+    if (!needsSeed) {
+      // All bubbles have valid, non-clustered positions
+      // Just ensure layoutReady is set
+      if (!layoutReady) {
+        hasShownLayout.current = true
+        setLayoutReady(true)
+        console.log(`[ForceGraph3D] All ${collapsedGroups.length} bubbles have positions, setting layoutReady`)
+      }
+      // Update the group key
+      prevGroupKeyRef.current = groupKey
+      return
+    }
+
+    // Update the group key
+    prevGroupKeyRef.current = groupKey
+
+    console.log(`[ForceGraph3D] Seeding positions for ${collapsedGroups.length} bubbles (missing=${missingCount}, changed=${groupsChanged}, clustered=${isClustered})`)
+
+    // For bubbles that still need positions, spread them in a sphere pattern
+    const radius = Math.min(100, Math.max(30, Math.sqrt(collapsedGroups.length) * 4))
+    let seedIndex = 0
+
+    for (const group of collapsedGroups) {
+      // Skip bubbles that already have valid positions
+      const pos = positionsRef.current.get(group.id)
+      if (pos && !Number.isNaN(pos[0]) && !isClustered) {
+        continue
+      }
 
       // Use golden angle spiral for even distribution on sphere
-      const phi = Math.acos(1 - 2 * (i + 0.5) / collapsedGroups.length)
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i
+      const phi = Math.acos(1 - 2 * (seedIndex + 0.5) / collapsedGroups.length)
+      const theta = Math.PI * (1 + Math.sqrt(5)) * seedIndex
 
       const x = radius * Math.sin(phi) * Math.cos(theta)
       const y = radius * Math.sin(phi) * Math.sin(theta)
       const z = radius * Math.cos(phi)
 
       // Add small random jitter
-      const jitter = 2
+      const jitter = 3
       positionsRef.current.set(group.id, [
         x + (Math.random() - 0.5) * jitter,
         y + (Math.random() - 0.5) * jitter,
         z + (Math.random() - 0.5) * jitter,
       ])
-      seededCount++
+      seedIndex++
     }
 
-    if (seededCount > 0) {
-      console.log(`[ForceGraph3D] Seeded ${seededCount} bubble positions in sphere pattern (radius: ${radius})`)
+    if (seedIndex > 0) {
+      console.log(`[ForceGraph3D] Seeded ${seedIndex} bubble positions (radius=${radius})`)
     }
-    return seededCount
-  }, [lensedGroups, positionsRef.current.size]) // Re-run when groups change
 
-  // Force re-render after bubble positions are seeded (since ref changes don't trigger render)
-  const [, forceRender] = useState(0)
+    // Set layoutReady and force re-render
+    hasShownLayout.current = true
+    setLayoutReady(true)
+  }, [lensedGroups, layoutReady])
+
+
+  // Also set layoutReady when we have lensed nodes with positions but no bubble seeding happened
+  // (e.g., in full/canvas mode or when positions were already valid)
   useEffect(() => {
-    if (bubblePositionsSeeded > 0) {
-      forceRender(n => n + 1)
+    if (lensedNodes.length > 0 && !layoutReady && activeLensId !== 'namespaces') {
+      // Check if all lensed nodes have positions
+      const allHavePositions = lensedNodes.every(n => {
+        const pos = positionsRef.current.get(n.id)
+        return pos && !Number.isNaN(pos[0]) && !Number.isNaN(pos[1]) && !Number.isNaN(pos[2])
+      })
+      if (allHavePositions) {
+        console.log('[ForceGraph3D] All lensed nodes have valid positions, setting layoutReady')
+        hasShownLayout.current = true
+        setLayoutReady(true)
+      }
     }
-  }, [bubblePositionsSeeded])
+  }, [lensedNodes, layoutReady, activeLensId])
 
   const handleNodeSelect = useCallback((node: Node | null) => onNodeSelect?.(node), [onNodeSelect])
   const handleEdgeSelect = useCallback((edge: { id: string; source: string; target: string } | null) => onEdgeSelect?.(edge), [onEdgeSelect])
@@ -1205,6 +1387,7 @@ export function ForceGraph3D({
           activeLensId={activeLensId}
           lensFocusNodeId={lensFocusNodeId}
           onNodeContextMenu={handleNodeContextMenu}
+          nodeCommunities={nodeCommunities}
         />
       </Canvas>
 
@@ -1248,8 +1431,17 @@ export function ForceGraph3D({
             groupId={contextMenu.group.id}
             namespace={contextMenu.group.namespace}
             nodeCount={contextMenu.group.nodeCount}
+            nodeIds={contextMenu.group.nodeIds}
             isExpanded={contextMenu.group.expanded}
             onClose={closeContextMenu}
+            onJumpToNamespace={onJumpToNamespace}
+            onJumpToCode={onJumpToCode ? (nodeId: string) => {
+              // Find the node and call onJumpToCode with its file location (fallback)
+              const node = allNodes.find(n => n.id === nodeId)
+              if (node?.filePath && node?.lineNumber) {
+                onJumpToCode(node.filePath, node.lineNumber)
+              }
+            } : undefined}
           />
         </>
       )}
