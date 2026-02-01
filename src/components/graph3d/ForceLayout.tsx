@@ -564,6 +564,66 @@ export function ForceLayout({
     }
   }, [physics.communityAwareLayout, nodeCommunities])
 
+  // Track previous namespace clustering state to detect changes
+  const prevClusteringEnabledRef = useRef(physics.clusteringEnabled)
+  const prevClusteringDepthRef = useRef(physics.clusteringDepth)
+
+  // When namespace clustering is toggled or depth changes, quickly reposition nodes
+  useEffect(() => {
+    const enabledChanged = physics.clusteringEnabled !== prevClusteringEnabledRef.current
+    const depthChanged = physics.clusteringDepth !== prevClusteringDepthRef.current
+
+    if (enabledChanged || (depthChanged && physics.clusteringEnabled)) {
+      prevClusteringEnabledRef.current = physics.clusteringEnabled
+      prevClusteringDepthRef.current = physics.clusteringDepth
+
+      const positions = positionsRef.current
+      const vels = velocities.current
+
+      if (physics.clusteringEnabled && namespaceGroups) {
+        console.log(`[ForceLayout] Namespace clustering changed, repositioning nodes to cluster centers`)
+
+        // Convert positions to Vec3 format for centroid calculation
+        const positionsVec3 = new Map<string, Vec3>()
+        for (const [id, pos] of positions.entries()) {
+          positionsVec3.set(id, { x: pos[0], y: pos[1], z: pos[2] })
+        }
+
+        // Compute current namespace centroids
+        const centroids = computeClusterCentroids(namespaceGroups, positionsVec3)
+
+        // Move nodes toward their namespace centroid (80% of the way)
+        for (const [namespace, nodesInGroup] of namespaceGroups.entries()) {
+          const centroid = centroids.get(namespace)
+          if (!centroid) continue
+
+          for (const node of nodesInGroup) {
+            const pos = positions.get(node.id)
+            const vel = vels.get(node.id)
+            if (!pos) continue
+
+            // Move 80% toward centroid + small random offset
+            const t = 0.8
+            pos[0] = pos[0] * (1 - t) + centroid.x * t + (Math.random() - 0.5) * 2
+            pos[1] = pos[1] * (1 - t) + centroid.y * t + (Math.random() - 0.5) * 2
+            pos[2] = pos[2] * (1 - t) + centroid.z * t + (Math.random() - 0.5) * 2
+
+            // Clear velocity for quick settling
+            if (vel) {
+              vel[0] = 0; vel[1] = 0; vel[2] = 0
+            }
+          }
+        }
+      } else {
+        console.log(`[ForceLayout] Namespace clustering disabled`)
+      }
+
+      // Reset stable frames to allow simulation to run
+      stableFrames.current = 0
+      hasTriggeredStable.current = false
+    }
+  }, [physics.clusteringEnabled, physics.clusteringDepth, namespaceGroups])
+
   const runWarmupIfNeeded = useCallback((source: string) => {
     const positions = positionsRef.current
     // Detect if warmup is needed (first load or large change in node count)
