@@ -1974,8 +1974,8 @@ function LocalEditorContent() {
                                             <SortableContext items={sectionOrder} strategy={verticalListSortingStrategy}>
                                             <div className="h-full overflow-y-auto p-3 flex flex-col gap-4">
                                                 {/* === GRAPH SIMPLIFICATION === */}
-                                                <SortableSection id="graphSimplification">
-                                                <div style={{ order: sectionOrder.indexOf('graphSimplification') }}>
+                                                <SortableSection id="graphSimplification" order={sectionOrder.indexOf('graphSimplification')}>
+                                                <div>
                                                     <button
                                                         onClick={() => toggleSection('graphSimplification')}
                                                         className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
@@ -2058,9 +2058,9 @@ function LocalEditorContent() {
                                                 </SortableSection>
 
                                                 {/* === LAYOUT OPTIMIZATION === */}
-                                                <SortableSection id="layoutOptimization" disabled={viewMode !== '3d'}>
+                                                <SortableSection id="layoutOptimization" disabled={viewMode !== '3d'} order={sectionOrder.indexOf('layoutOptimization')}>
                                                 {viewMode === '3d' && (
-                                                    <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('layoutOptimization') }}>
+                                                    <div className="border-t border-white/10 pt-3">
                                                         <div className="flex items-center gap-1">
                                                             <button
                                                                 onClick={() => toggleSection('layoutOptimization')}
@@ -2402,9 +2402,9 @@ function LocalEditorContent() {
                                                 </SortableSection>
 
                                                 {/* === PHYSICS === */}
-                                                <SortableSection id="physics" disabled={viewMode !== '3d'}>
+                                                <SortableSection id="physics" disabled={viewMode !== '3d'} order={sectionOrder.indexOf('physics')}>
                                                 {viewMode === '3d' && (
-                                                    <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('physics') }}>
+                                                    <div className="border-t border-white/10 pt-3">
                                                         <div className="flex items-center gap-1">
                                                             <button
                                                                 onClick={() => toggleSection('physics')}
@@ -2512,8 +2512,8 @@ function LocalEditorContent() {
                                                 </SortableSection>
 
                                                 {/* === ANALYSIS === */}
-                                                <SortableSection id="analysis">
-                                                <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('analysis') }}>
+                                                <SortableSection id="analysis" order={sectionOrder.indexOf('analysis')}>
+                                                <div className="border-t border-white/10 pt-3">
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             onClick={() => toggleSection('analysis')}
@@ -3048,8 +3048,8 @@ $$F_c = k_c \\cdot d_{center}$$
                                                 </SortableSection>
 
                                                 {/* === ACTIONS === */}
-                                                <SortableSection id="actions">
-                                                <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('actions') }}>
+                                                <SortableSection id="actions" order={sectionOrder.indexOf('actions')}>
+                                                <div className="border-t border-white/10 pt-3">
                                                     <button
                                                         onClick={() => toggleSection('actions')}
                                                         className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"

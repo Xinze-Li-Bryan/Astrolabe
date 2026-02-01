@@ -9,9 +9,10 @@ interface SortableSectionProps {
     id: string
     children: ReactNode
     disabled?: boolean
+    order?: number
 }
 
-export function SortableSection({ id, children, disabled }: SortableSectionProps) {
+export function SortableSection({ id, children, disabled, order }: SortableSectionProps) {
     const {
         attributes,
         listeners,
@@ -21,11 +22,12 @@ export function SortableSection({ id, children, disabled }: SortableSectionProps
         isDragging,
     } = useSortable({ id, disabled })
 
-    const style = {
+    const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.5 : 1,
         zIndex: isDragging ? 1000 : 'auto',
+        order: order ?? 0,
     }
 
     return (
