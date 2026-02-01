@@ -2391,7 +2391,108 @@ Count of incoming edges. High in-degree = widely used/depended upon.`} />
 Groups densely connected nodes. Higher $Q$ = better separation.`} />
                                                                         </div>
                                                                     </details>
+                                                                    {/* Dependency Depth */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Dependency Depth</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$\\text{depth}(v) = \\max_{u \\in \\text{ancestors}(v)} d(u, v)$$
+
+Longest path from any root (axiom/definition) to the node.
+
+- **Depth 0**: Axioms, definitions (no dependencies)
+- **Higher depth**: More abstract theorems
+
+Useful for understanding proof "height" in the abstraction hierarchy.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Bottleneck Score */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Bottleneck Score</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$\\text{bottleneck}(v) = \\frac{|\\text{descendants}(v)|}{|\\text{ancestors}(v)|}$$
+
+Ratio of nodes depending on $v$ to nodes $v$ depends on.
+
+- **High score**: Foundational lemma (many depend on it, it depends on few)
+- **Score = 0**: Terminal theorem (no dependents)
+
+Identifies key "building blocks" in the proof structure.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Reachability */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Reachability Count</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$\\text{reach}(v) = |\\{u : u \\text{ is reachable from } v\\}|$$
+
+Number of nodes transitively depending on this node.
+
+- **High reachability**: Breaking this would affect many theorems
+- **Low reachability**: Leaf or specialized result
+
+Impact analysis: "How many results depend on this lemma?"`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Spectral Clustering */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Spectral Clustering</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`Uses graph Laplacian eigenvectors:
+$$L = D - A$$
+
+The **Fiedler vector** (2nd smallest eigenvalue) partitions the graph.
+
+May reveal structure that Louvain misses, especially for:
+- Sparse connections between dense clusters
+- Hierarchical module boundaries`} />
+                                                                        </div>
+                                                                    </details>
                                                                 </div>
+                                                                {/* DAG Statistics Summary */}
+                                                                {analysisData.graphDepth !== undefined && (
+                                                                    <div className="mt-4 pt-4 border-t border-white/10">
+                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">DAG Statistics</h3>
+                                                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                                                            <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="text-white/40 text-xs">Graph Depth</div>
+                                                                                <div className="text-white font-medium">{analysisData.graphDepth}</div>
+                                                                            </div>
+                                                                            <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="text-white/40 text-xs">Layers</div>
+                                                                                <div className="text-white font-medium">{analysisData.numLayers}</div>
+                                                                            </div>
+                                                                            <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="text-white/40 text-xs">Sources (Axioms)</div>
+                                                                                <div className="text-white font-medium">{analysisData.sources?.length ?? 0}</div>
+                                                                            </div>
+                                                                            <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="text-white/40 text-xs">Sinks (Terminals)</div>
+                                                                                <div className="text-white font-medium">{analysisData.sinks?.length ?? 0}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        {analysisData.criticalPath && analysisData.criticalPath.length > 0 && (
+                                                                            <div className="mt-2 bg-white/5 rounded px-3 py-2">
+                                                                                <div className="text-white/40 text-xs mb-1">Critical Path ({analysisData.criticalPath.length} nodes)</div>
+                                                                                <div className="text-white/60 text-xs font-mono truncate">
+                                                                                    {analysisData.criticalPath.slice(0, 3).join(' → ')}
+                                                                                    {analysisData.criticalPath.length > 3 && ` → ... → ${analysisData.criticalPath[analysisData.criticalPath.length - 1]}`}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                                 <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">
                                                                     Click anywhere to close
                                                                 </div>
