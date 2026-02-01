@@ -321,11 +321,23 @@ function simulateStep(
 
     velocities.set(node.id, vel)
 
-    positions.set(node.id, [
+    let newPos: [number, number, number] = [
       pos[0] + vel[0] * dt,
       pos[1] + vel[1] * dt,
       pos[2] + vel[2] * dt,
-    ])
+    ]
+
+    // Hard boundary clamp
+    if (boundaryRadius > 0) {
+      const newDist = Math.sqrt(newPos[0] * newPos[0] + newPos[1] * newPos[1] + newPos[2] * newPos[2])
+      if (newDist > boundaryRadius) {
+        const scale = boundaryRadius / newDist
+        newPos = [newPos[0] * scale, newPos[1] * scale, newPos[2] * scale]
+        velocities.set(node.id, [0, 0, 0])
+      }
+    }
+
+    positions.set(node.id, newPos)
 
     totalMovement += Math.abs(vel[0]) + Math.abs(vel[1]) + Math.abs(vel[2])
   })
@@ -1130,7 +1142,7 @@ export function ForceLayout({
       velocities.current.set(node.id, vel)
 
       // Update position
-      const newPos: [number, number, number] = [
+      let newPos: [number, number, number] = [
         pos[0] + vel[0] * dt,
         pos[1] + vel[1] * dt,
         pos[2] + vel[2] * dt,
@@ -1141,6 +1153,17 @@ export function ForceLayout({
         newPositions.set(node.id, [0, 0, 0])
         velocities.current.set(node.id, [0, 0, 0])
         return
+      }
+
+      // Hard boundary clamp - if still outside, clamp to boundary edge
+      if (boundaryRadius > 0) {
+        const newDist = Math.sqrt(newPos[0] * newPos[0] + newPos[1] * newPos[1] + newPos[2] * newPos[2])
+        if (newDist > boundaryRadius) {
+          const scale = boundaryRadius / newDist
+          newPos = [newPos[0] * scale, newPos[1] * scale, newPos[2] * scale]
+          // Also kill velocity to prevent bouncing
+          velocities.current.set(node.id, [0, 0, 0])
+        }
       }
 
       newPositions.set(node.id, newPos)
