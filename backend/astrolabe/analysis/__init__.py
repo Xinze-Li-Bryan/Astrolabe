@@ -47,6 +47,15 @@ from .dag import (
     compute_graph_depth,
     analyze_dag,
 )
+from .structural import (
+    find_bridges,
+    find_articulation_points,
+    compute_hits,
+    get_top_hubs,
+    get_top_authorities,
+    compute_katz_centrality,
+    analyze_structure,
+)
 
 __all__ = [
     # Graph builder
@@ -82,4 +91,12 @@ __all__ = [
     "find_critical_path_to",
     "compute_graph_depth",
     "analyze_dag",
+    # Structural analysis
+    "find_bridges",
+    "find_articulation_points",
+    "compute_hits",
+    "get_top_hubs",
+    "get_top_authorities",
+    "compute_katz_centrality",
+    "analyze_structure",
 ]

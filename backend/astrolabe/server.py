@@ -2227,6 +2227,112 @@ async def get_critical_path_to_node(
         }
 
 
+@app.get("/api/project/analysis/structural")
+async def get_structural_analysis(
+    path: str = Query(..., description="Project path"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+):
+    """
+    Get structural analysis: bridges, articulation points, HITS scores.
+
+    Identifies critical structural elements in the dependency graph:
+    - Bridges: edges whose removal disconnects the graph
+    - Articulation points: nodes whose removal disconnects the graph
+    - HITS: hub and authority scores
+
+    Returns:
+        - bridges: List of bridge edges
+        - articulationPoints: List of articulation point node IDs
+        - topHubs: Nodes with highest hub scores (comprehensive proofs)
+        - topAuthorities: Nodes with highest authority scores (fundamental theorems)
+    """
+    from .analysis.structural import (
+        find_bridges,
+        find_articulation_points,
+        get_top_hubs,
+        get_top_authorities,
+    )
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    bridges = find_bridges(G)
+    ap = find_articulation_points(G)
+    top_hubs = get_top_hubs(G, k=top_k)
+    top_authorities = get_top_authorities(G, k=top_k)
+
+    return {
+        "status": "ok",
+        "analysis": "structural",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": {
+            "bridges": [{"source": s, "target": t} for s, t in bridges],
+            "numBridges": len(bridges),
+            "articulationPoints": ap,
+            "numArticulationPoints": len(ap),
+            "topHubs": [{"nodeId": n, "score": s} for n, s in top_hubs],
+            "topAuthorities": [{"nodeId": n, "score": s} for n, s in top_authorities],
+        },
+    }
+
+
+@app.get("/api/project/analysis/katz")
+async def get_katz_centrality(
+    path: str = Query(..., description="Project path"),
+    alpha: float = Query(0.1, description="Attenuation factor"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_all: bool = Query(False, description="Include all node values"),
+):
+    """
+    Get Katz centrality analysis.
+
+    Katz centrality measures influence based on total walks from a node.
+    Better suited for DAGs than PageRank as it handles sink nodes.
+
+    Args:
+        alpha: Attenuation factor (lower = less influence from distant nodes)
+        top_k: Number of top nodes to return
+
+    Returns:
+        - topNodes: Nodes with highest Katz centrality
+        - values: (optional) All node values
+    """
+    from .analysis.structural import compute_katz_centrality
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    katz = compute_katz_centrality(G, alpha=alpha)
+    sorted_katz = sorted(katz.items(), key=lambda x: -x[1])[:top_k]
+
+    response_data = {
+        "topNodes": [{"nodeId": n, "value": v} for n, v in sorted_katz],
+    }
+
+    if include_all:
+        response_data["values"] = katz
+
+    return {
+        "status": "ok",
+        "analysis": "katz",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "alpha": alpha,
+        "data": response_data,
+    }
+
+
 # ============================================
 # Main Entry Point
 # ============================================
