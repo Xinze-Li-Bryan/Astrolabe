@@ -247,6 +247,7 @@ function LocalEditorContent() {
     const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree' | 'depth' | 'bottleneck' | 'reachability'>('default')
     const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
     const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community' | 'layer' | 'spectral'>('kind')
+    const [layoutClusterMode, setLayoutClusterMode] = useState<'none' | 'community' | 'layer' | 'spectral'>('none')
     const [analysisData, setAnalysisData] = useState<{
         pagerank?: Record<string, number>
         indegree?: Record<string, number>
@@ -269,6 +270,10 @@ function LocalEditorContent() {
         // Spectral clustering
         spectralClusters?: Record<string, number>
         numSpectralClusters?: number
+        // Entropy
+        vonNeumannEntropy?: number
+        degreeShannon?: number
+        structureEntropy?: number
     }>({})
     const [analysisLoading, setAnalysisLoading] = useState(false)
 
@@ -287,19 +292,26 @@ function LocalEditorContent() {
     ], [])
 
     // Convert communities/clusters to Map for ForceLayout
-    // Uses current colorMappingMode to select appropriate clustering data
+    // Uses layoutClusterMode (independent from colorMappingMode)
     const nodeCommunities = useMemo(() => {
-        if (colorMappingMode === 'spectral' && analysisData.spectralClusters) {
-            return new Map(Object.entries(analysisData.spectralClusters))
+        if (layoutClusterMode === 'spectral') {
+            return analysisData.spectralClusters
+                ? new Map(Object.entries(analysisData.spectralClusters))
+                : null
         }
-        if (colorMappingMode === 'layer' && analysisData.layers) {
-            return new Map(Object.entries(analysisData.layers).map(([k, v]) => [k, v]))
+        if (layoutClusterMode === 'layer') {
+            return analysisData.layers
+                ? new Map(Object.entries(analysisData.layers).map(([k, v]) => [k, v]))
+                : null
         }
-        if (analysisData.communities) {
-            return new Map(Object.entries(analysisData.communities))
+        if (layoutClusterMode === 'community') {
+            return analysisData.communities
+                ? new Map(Object.entries(analysisData.communities))
+                : null
         }
+        // For 'none' mode, no clustering
         return null
-    }, [colorMappingMode, analysisData.communities, analysisData.spectralClusters, analysisData.layers])
+    }, [layoutClusterMode, analysisData.communities, analysisData.spectralClusters, analysisData.layers])
 
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
@@ -1264,12 +1276,13 @@ function LocalEditorContent() {
             const pathParam = `path=${encodeURIComponent(projectPath)}`
 
             // Fetch all analysis data in parallel
-            const [pagerankRes, degreeRes, communitiesRes, dagRes, spectralRes] = await Promise.all([
+            const [pagerankRes, degreeRes, communitiesRes, dagRes, spectralRes, entropyRes] = await Promise.all([
                 fetch(`${baseUrl}/pagerank?${pathParam}&top_k=10000`),
                 fetch(`${baseUrl}/degree?${pathParam}`),
                 fetch(`${baseUrl}/communities?${pathParam}`),
                 fetch(`${baseUrl}/dag?${pathParam}&include_all_depths=true&include_all_scores=true`),
                 fetch(`${baseUrl}/spectral?${pathParam}&n_clusters=8`),
+                fetch(`${baseUrl}/entropy?${pathParam}`),
             ])
 
             // Parse responses
@@ -1278,6 +1291,8 @@ function LocalEditorContent() {
             const communitiesData = communitiesRes.ok ? await communitiesRes.json() : null
             const dagData = dagRes.ok ? await dagRes.json() : null
             const spectralData = spectralRes.ok ? await spectralRes.json() : null
+            const entropyData = entropyRes.ok ? await entropyRes.json() : null
+
 
             // Build pagerank map
             const pagerankMap: Record<string, number> = {}
@@ -1327,6 +1342,10 @@ function LocalEditorContent() {
                 // Spectral clustering
                 spectralClusters: spectralData?.data?.clusters,
                 numSpectralClusters: spectralData?.data?.numClusters,
+                // Entropy
+                vonNeumannEntropy: entropyData?.data?.vonNeumannEntropy,
+                degreeShannon: entropyData?.data?.degreeShannon,
+                structureEntropy: entropyData?.data?.structureEntropy,
             })
         } catch (error) {
             console.error('Analysis failed:', error)
@@ -1335,12 +1354,14 @@ function LocalEditorContent() {
         }
     }, [projectPath])
 
-    // Auto-compute analysis when project loads
+    // Auto-compute analysis when project loads (runs once per project)
+    const analysisComputedRef = useRef<string | null>(null)
     useEffect(() => {
-        if (projectPath && astrolabeNodes.length > 0 && !analysisData.pagerank) {
+        if (projectPath && astrolabeNodes.length > 0 && analysisComputedRef.current !== projectPath) {
+            analysisComputedRef.current = projectPath
             computeAnalysis()
         }
-    }, [projectPath, astrolabeNodes.length, analysisData.pagerank, computeAnalysis])
+    }, [projectPath, astrolabeNodes.length, computeAnalysis])
 
     // Handle node click (adapted to Node type)
     const handleCanvasNodeClick = useCallback((node: Node | null) => {
@@ -2075,19 +2096,25 @@ function LocalEditorContent() {
                                                             )}
                                                         </div>
 
-                                                        {/* Community/Cluster Grouping */}
-                                                        <div>
+                                                        {/* Community Clustering */}
+                                                        <div className="mb-3">
                                                             <div className="flex items-center gap-2">
                                                                 <input
                                                                     type="checkbox"
-                                                                    checked={physics.communityAwareLayout}
-                                                                    disabled={!nodeCommunities}
-                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, communityAwareLayout: e.target.checked })}
+                                                                    checked={layoutClusterMode === 'community'}
+                                                                    disabled={!analysisData.communities}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            setLayoutClusterMode('community')
+                                                                            updatePhysicsUndoable({ ...physics, communityAwareLayout: true })
+                                                                        } else {
+                                                                            setLayoutClusterMode('none')
+                                                                            updatePhysicsUndoable({ ...physics, communityAwareLayout: false })
+                                                                        }
+                                                                    }}
                                                                     className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40 disabled:opacity-30"
                                                                 />
-                                                                <span className={`text-xs ${nodeCommunities ? 'text-white/80' : 'text-white/40'}`}>
-                                                                    {colorMappingMode === 'spectral' ? 'Spectral' : colorMappingMode === 'layer' ? 'Layer' : 'Community'} Clustering
-                                                                </span>
+                                                                <span className={`text-xs ${analysisData.communities ? 'text-white/80' : 'text-white/40'}`}>Community Clustering</span>
                                                                 <button
                                                                     onClick={() => setExpandedInfoTips(prev => {
                                                                         const next = new Set(prev)
@@ -2095,16 +2122,126 @@ function LocalEditorContent() {
                                                                         return next
                                                                     })}
                                                                     className="ml-auto text-white/30 hover:text-white/60"
+                                                                    title="Cluster by Louvain community detection"
                                                                 >
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {!nodeCommunities && (
-                                                                <p className="text-[10px] text-amber-400/60 mt-1 ml-5">
-                                                                    Run &quot;Compute Analysis&quot; to enable
-                                                                </p>
+                                                            {layoutClusterMode === 'community' && analysisData.communities && (
+                                                                <div className="mt-2 ml-5">
+                                                                    <input
+                                                                        type="range"
+                                                                        min="0"
+                                                                        max="2.0"
+                                                                        step="0.1"
+                                                                        value={physics.communityClusteringStrength ?? 0.3}
+                                                                        onChange={(e) => {
+                                                                            const intensity = parseFloat(e.target.value)
+                                                                            updatePhysicsUndoable({
+                                                                                ...physics,
+                                                                                communityClusteringStrength: intensity,
+                                                                                communitySeparation: intensity * 1.5
+                                                                            })
+                                                                        }}
+                                                                        className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                    />
+                                                                    <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                        <span>Loose</span>
+                                                                        <span>Clustered</span>
+                                                                    </div>
+                                                                </div>
                                                             )}
-                                                            {physics.communityAwareLayout && nodeCommunities && (
+                                                        </div>
+
+                                                        {/* Layer Clustering */}
+                                                        <div className="mb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={layoutClusterMode === 'layer'}
+                                                                    disabled={!analysisData.layers}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            setLayoutClusterMode('layer')
+                                                                            updatePhysicsUndoable({ ...physics, communityAwareLayout: true })
+                                                                        } else {
+                                                                            setLayoutClusterMode('none')
+                                                                            updatePhysicsUndoable({ ...physics, communityAwareLayout: false })
+                                                                        }
+                                                                    }}
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40 disabled:opacity-30"
+                                                                />
+                                                                <span className={`text-xs ${analysisData.layers ? 'text-white/80' : 'text-white/40'}`}>Layer Clustering</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('layerClustering') ? next.delete('layerClustering') : next.add('layerClustering')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                    title="Cluster by topological depth"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {layoutClusterMode === 'layer' && analysisData.layers && (
+                                                                <div className="mt-2 ml-5">
+                                                                    <input
+                                                                        type="range"
+                                                                        min="0"
+                                                                        max="2.0"
+                                                                        step="0.1"
+                                                                        value={physics.communityClusteringStrength ?? 0.3}
+                                                                        onChange={(e) => {
+                                                                            const intensity = parseFloat(e.target.value)
+                                                                            updatePhysicsUndoable({
+                                                                                ...physics,
+                                                                                communityClusteringStrength: intensity,
+                                                                                communitySeparation: intensity * 1.5
+                                                                            })
+                                                                        }}
+                                                                        className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                    />
+                                                                    <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                        <span>Loose</span>
+                                                                        <span>Clustered</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Spectral Clustering */}
+                                                        <div className="mb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={layoutClusterMode === 'spectral'}
+                                                                    disabled={!analysisData.spectralClusters}
+                                                                    onChange={(e) => {
+                                                                        if (e.target.checked) {
+                                                                            setLayoutClusterMode('spectral')
+                                                                            updatePhysicsUndoable({ ...physics, communityAwareLayout: true })
+                                                                        } else {
+                                                                            setLayoutClusterMode('none')
+                                                                            updatePhysicsUndoable({ ...physics, communityAwareLayout: false })
+                                                                        }
+                                                                    }}
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40 disabled:opacity-30"
+                                                                />
+                                                                <span className={`text-xs ${analysisData.spectralClusters ? 'text-white/80' : 'text-white/40'}`}>Spectral Clustering</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('spectralClustering') ? next.delete('spectralClustering') : next.add('spectralClustering')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                    title="Cluster by graph Laplacian eigenvectors"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {layoutClusterMode === 'spectral' && analysisData.spectralClusters && (
                                                                 <div className="mt-2 ml-5">
                                                                     <input
                                                                         type="range"
@@ -2471,6 +2608,62 @@ May reveal structure that Louvain misses, especially for:
                                                                         </div>
                                                                     </details>
                                                                 </div>
+                                                                {/* Graph Statistics */}
+                                                                {(analysisData.density !== undefined || analysisData.vonNeumannEntropy !== undefined) && (
+                                                                    <div className="mt-4 pt-4 border-t border-white/10">
+                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">Graph Statistics</h3>
+                                                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                                                            {analysisData.nodeCount !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Nodes</div>
+                                                                                    <div className="text-white font-medium">{analysisData.nodeCount.toLocaleString()}</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.edgeCount !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Edges</div>
+                                                                                    <div className="text-white font-medium">{analysisData.edgeCount.toLocaleString()}</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.density !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Density</div>
+                                                                                    <div className="text-white font-medium">{(analysisData.density * 100).toFixed(4)}%</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.communityCount !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Communities</div>
+                                                                                    <div className="text-white font-medium">{analysisData.communityCount}</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.modularity !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Modularity Q</div>
+                                                                                    <div className="text-white font-medium">{analysisData.modularity.toFixed(4)}</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.vonNeumannEntropy !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Von Neumann Entropy</div>
+                                                                                    <div className="text-white font-medium">{analysisData.vonNeumannEntropy.toFixed(4)}</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.degreeShannon !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Degree Shannon Entropy</div>
+                                                                                    <div className="text-white font-medium">{analysisData.degreeShannon.toFixed(4)}</div>
+                                                                                </div>
+                                                                            )}
+                                                                            {analysisData.structureEntropy !== undefined && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Structure Entropy</div>
+                                                                                    <div className="text-white font-medium">{analysisData.structureEntropy.toFixed(4)}</div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
                                                                 {/* DAG Statistics Summary */}
                                                                 {analysisData.graphDepth !== undefined && (
                                                                     <div className="mt-4 pt-4 border-t border-white/10">
@@ -2637,17 +2830,25 @@ where:
                                                             onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('communityClustering'); return next })}
                                                         >
                                                             <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                                                                <h2 className="text-lg text-white font-medium mb-3">Community Clustering</h2>
-                                                                <p className="text-sm text-white/70 mb-4">Group nodes by detected communities (from Louvain algorithm). Similar to namespace clustering but based on graph structure.</p>
-                                                                <MarkdownRenderer content={`**Force Model:**
+                                                                <h2 className="text-lg text-white font-medium mb-3">Graph-Based Clustering</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Group nodes by graph structure. The clustering method depends on your Color Mapping selection:</p>
+                                                                <MarkdownRenderer content={`**Clustering Methods:**
 
-Same as namespace clustering, but uses community centroids instead of namespace centroids:
+- **Community** (Louvain): Groups densely connected nodes. Best for finding modules.
+- **Layer** (Topological): Groups by dependency depth. Nodes at same "level" cluster together.
+- **Spectral** (Laplacian): Uses eigenvectors of graph Laplacian. May find hidden structure.
+
+**Force Model:**
+
+Nodes in the same cluster attract each other:
 
 $$F_{attract} = \\frac{k}{d^2 + 1}$$
 
+Different clusters repel:
+
 $$F_{repel} = \\frac{s}{d^2 + 1}$$
 
-**Requires** running Network Analysis first to detect communities.`} />
+**Usage:** Select clustering type in Color Mapping, then enable here.`} />
                                                                 <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
                                                             </div>
                                                         </div>
@@ -2689,15 +2890,16 @@ $$F_c = k_c \\cdot d_{center}$$
                                                             <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
                                                             <div className="flex flex-wrap gap-1 mt-1">
                                                                 {([
-                                                                    { mode: 'default' as const, label: 'Default', data: true },
-                                                                    { mode: 'pagerank' as const, label: 'PageRank', data: analysisData.pagerank },
-                                                                    { mode: 'indegree' as const, label: 'In-deg', data: analysisData.indegree },
-                                                                    { mode: 'depth' as const, label: 'Depth', data: analysisData.depths },
-                                                                    { mode: 'bottleneck' as const, label: 'Bottleneck', data: analysisData.bottleneckScores },
-                                                                    { mode: 'reachability' as const, label: 'Reach', data: analysisData.reachability },
-                                                                ]).map(({ mode, label, data }) => (
+                                                                    { mode: 'default' as const, label: 'Default', data: true, tooltip: 'Uniform node size' },
+                                                                    { mode: 'pagerank' as const, label: 'PageRank', data: analysisData.pagerank, tooltip: 'Size by importance (referenced by important nodes)' },
+                                                                    { mode: 'indegree' as const, label: 'In-deg', data: analysisData.indegree, tooltip: 'Size by number of incoming edges (how many depend on it)' },
+                                                                    { mode: 'depth' as const, label: 'Depth', data: analysisData.depths, tooltip: 'Size by dependency depth (distance from axioms)' },
+                                                                    { mode: 'bottleneck' as const, label: 'Bottleneck', data: analysisData.bottleneckScores, tooltip: 'Size by bottleneck score (dependents / dependencies ratio)' },
+                                                                    { mode: 'reachability' as const, label: 'Reach', data: analysisData.reachability, tooltip: 'Size by reachability (how many nodes depend on this transitively)' },
+                                                                ]).map(({ mode, label, data, tooltip }) => (
                                                                     <button
                                                                         key={mode}
+                                                                        title={tooltip}
                                                                         onClick={() => setSizeMappingMode(mode)}
                                                                         className={`px-2 py-1 text-[10px] rounded transition-colors ${
                                                                             sizeMappingMode === mode
@@ -2717,13 +2919,14 @@ $$F_c = k_c \\cdot d_{center}$$
                                                             <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
                                                             <div className="flex flex-wrap gap-1 mt-1">
                                                                 {([
-                                                                    { mode: 'kind' as const, label: 'Kind', data: true },
-                                                                    { mode: 'community' as const, label: 'Community', data: analysisData.communities },
-                                                                    { mode: 'layer' as const, label: 'Layer', data: analysisData.layers },
-                                                                    { mode: 'spectral' as const, label: 'Spectral', data: analysisData.spectralClusters },
-                                                                ]).map(({ mode, label, data }) => (
+                                                                    { mode: 'kind' as const, label: 'Kind', data: true, tooltip: 'Color by node type (theorem, lemma, def, etc.)' },
+                                                                    { mode: 'community' as const, label: 'Community', data: analysisData.communities, tooltip: 'Color by Louvain community detection' },
+                                                                    { mode: 'layer' as const, label: 'Layer', data: analysisData.layers, tooltip: 'Color by topological layer (dependency depth)' },
+                                                                    { mode: 'spectral' as const, label: 'Spectral', data: analysisData.spectralClusters, tooltip: 'Color by spectral clustering (graph Laplacian)' },
+                                                                ]).map(({ mode, label, data, tooltip }) => (
                                                                     <button
                                                                         key={mode}
+                                                                        title={tooltip}
                                                                         onClick={() => setColorMappingMode(mode)}
                                                                         className={`px-2 py-1 text-[10px] rounded transition-colors ${
                                                                             colorMappingMode === mode

@@ -79,6 +79,10 @@ def build_networkx_graph(
     for edge in edges:
         # Only add edges where both endpoints exist
         if edge.source in node_ids and edge.target in node_ids:
+            # Skip parent-child edges that create false cycles
+            # (e.g., MState -> MState.Hermitian and MState.Hermitian -> MState)
+            if _is_parent_child_edge(edge.source, edge.target):
+                continue
             G.add_edge(
                 edge.source,
                 edge.target,
@@ -86,6 +90,21 @@ def build_networkx_graph(
             )
 
     return G
+
+
+def _is_parent_child_edge(source: str, target: str) -> bool:
+    """
+    Check if edge is between parent and direct child (structure/projection).
+
+    These edges create false cycles in Lean dependency graphs because
+    structures and their projections are defined simultaneously.
+
+    Examples:
+        - MState -> MState.Hermitian (parent to child)
+        - MState.Hermitian -> MState (child to parent)
+    """
+    # Check if one is a direct child of the other
+    return target.startswith(source + ".") or source.startswith(target + ".")
 
 
 def build_undirected_graph(nodes: List[Node], edges: List[Edge]) -> nx.Graph:

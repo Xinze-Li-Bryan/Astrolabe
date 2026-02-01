@@ -526,7 +526,7 @@ class TestNonDAGHandling:
             compute_dependency_depth(G)
 
     def test_analyze_dag_with_cycle(self):
-        """analyze_dag should handle cycles gracefully"""
+        """analyze_dag should handle cycles using condensation"""
         from astrolabe.analysis.dag import analyze_dag
 
         G = nx.DiGraph()
@@ -534,6 +534,9 @@ class TestNonDAGHandling:
 
         result = analyze_dag(G)
 
-        # Should return error indicator
-        assert result.get("is_dag") == False
-        assert "error" in result
+        # Should use condensation to handle cycles
+        assert result.get("is_dag") == True  # Treated as DAG via condensation
+        assert result.get("has_cycles") == True  # Flag indicating original had cycles
+        assert "depths" in result
+        # All nodes in same SCC should have same depth
+        assert result["depths"]["A"] == result["depths"]["B"] == result["depths"]["C"]

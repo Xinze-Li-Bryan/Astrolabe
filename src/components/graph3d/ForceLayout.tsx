@@ -491,27 +491,78 @@ export function ForceLayout({
 
   // Track previous community layout state to detect changes
   const prevCommunityLayoutRef = useRef(physics.communityAwareLayout)
+  const prevNodeCommunitiesRef = useRef<Map<string, number> | null | undefined>(null)
 
-  // When community-aware layout is toggled, give nodes a velocity boost
+  // When community-aware layout is toggled or communities change, quickly reposition nodes
   useEffect(() => {
-    if (physics.communityAwareLayout !== prevCommunityLayoutRef.current) {
-      prevCommunityLayoutRef.current = physics.communityAwareLayout
-      console.log(`[ForceLayout] Community-aware layout ${physics.communityAwareLayout ? 'enabled' : 'disabled'}, boosting velocities`)
+    const communitiesChanged = nodeCommunities !== prevNodeCommunitiesRef.current
+    const layoutChanged = physics.communityAwareLayout !== prevCommunityLayoutRef.current
 
-      // Give all nodes a random velocity boost to kick-start the re-layout
+    if (layoutChanged || (communitiesChanged && physics.communityAwareLayout)) {
+      prevCommunityLayoutRef.current = physics.communityAwareLayout
+      prevNodeCommunitiesRef.current = nodeCommunities
+
+      const positions = positionsRef.current
       const vels = velocities.current
-      for (const [_nodeId, vel] of vels) {
-        // Add random velocity in range [-2, 2] for each axis
-        vel[0] += (Math.random() - 0.5) * 4
-        vel[1] += (Math.random() - 0.5) * 4
-        vel[2] += (Math.random() - 0.5) * 4
+
+      if (physics.communityAwareLayout && nodeCommunities && nodeCommunities.size > 0) {
+        console.log(`[ForceLayout] Community layout changed, repositioning nodes to cluster centers`)
+
+        // Group nodes by community ID
+        const communityGroups = new Map<number, string[]>()
+        for (const [nodeId, communityId] of nodeCommunities.entries()) {
+          if (!communityGroups.has(communityId)) {
+            communityGroups.set(communityId, [])
+          }
+          communityGroups.get(communityId)!.push(nodeId)
+        }
+
+        // Compute current community centroids
+        const communityCentroids = new Map<number, [number, number, number]>()
+        for (const [communityId, nodeIds] of communityGroups.entries()) {
+          let cx = 0, cy = 0, cz = 0, count = 0
+          for (const nodeId of nodeIds) {
+            const pos = positions.get(nodeId)
+            if (pos) {
+              cx += pos[0]; cy += pos[1]; cz += pos[2]; count++
+            }
+          }
+          if (count > 0) {
+            communityCentroids.set(communityId, [cx / count, cy / count, cz / count])
+          }
+        }
+
+        // Move nodes toward their community centroid (80% of the way)
+        for (const [communityId, nodeIds] of communityGroups.entries()) {
+          const centroid = communityCentroids.get(communityId)
+          if (!centroid) continue
+
+          for (const nodeId of nodeIds) {
+            const pos = positions.get(nodeId)
+            const vel = vels.get(nodeId)
+            if (!pos) continue
+
+            // Move 80% toward centroid + small random offset
+            const t = 0.8
+            pos[0] = pos[0] * (1 - t) + centroid[0] * t + (Math.random() - 0.5) * 2
+            pos[1] = pos[1] * (1 - t) + centroid[1] * t + (Math.random() - 0.5) * 2
+            pos[2] = pos[2] * (1 - t) + centroid[2] * t + (Math.random() - 0.5) * 2
+
+            // Clear velocity for quick settling
+            if (vel) {
+              vel[0] = 0; vel[1] = 0; vel[2] = 0
+            }
+          }
+        }
+      } else {
+        console.log(`[ForceLayout] Community layout disabled`)
       }
 
       // Reset stable frames to allow simulation to run
       stableFrames.current = 0
       hasTriggeredStable.current = false
     }
-  }, [physics.communityAwareLayout])
+  }, [physics.communityAwareLayout, nodeCommunities])
 
   const runWarmupIfNeeded = useCallback((source: string) => {
     const positions = positionsRef.current

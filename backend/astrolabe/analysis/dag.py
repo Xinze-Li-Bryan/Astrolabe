@@ -348,24 +348,28 @@ def analyze_dag(G: nx.DiGraph) -> Dict[str, Any]:
     """
     Run comprehensive DAG analysis.
 
+    If the graph contains small cycles (common in Lean dependency graphs due to
+    structure/projection relationships), uses condensation to handle them.
+    Nodes in the same SCC get the same depth/layer values.
+
     Args:
-        G: Directed graph (should be acyclic)
+        G: Directed graph (may contain small cycles)
 
     Returns:
-        Dict with all analysis results, or error info if not a DAG
+        Dict with all analysis results
     """
-    # Check if DAG
     is_dag = nx.is_directed_acyclic_graph(G)
 
-    if not is_dag:
-        return {
-            "is_dag": False,
-            "error": "Graph contains cycles",
-            "num_nodes": G.number_of_nodes(),
-            "num_edges": G.number_of_edges(),
-        }
+    if is_dag:
+        # Pure DAG - run analysis directly
+        return _analyze_pure_dag(G)
 
-    # Run all analyses
+    # Graph has cycles - use condensation approach
+    return _analyze_with_condensation(G)
+
+
+def _analyze_pure_dag(G: nx.DiGraph) -> Dict[str, Any]:
+    """Run DAG analysis on a pure DAG (no cycles)."""
     depths = compute_dependency_depth(G)
     layers = compute_topological_layers(G)
     sources = find_sources(G)
@@ -378,6 +382,96 @@ def analyze_dag(G: nx.DiGraph) -> Dict[str, Any]:
 
     return {
         "is_dag": True,
+        "depths": depths,
+        "layers": layers,
+        "sources": sources,
+        "sinks": sinks,
+        "widths": widths,
+        "bottleneck_scores": bottleneck_scores,
+        "reachability": reachability,
+        "critical_path": critical_path,
+        "graph_depth": graph_depth,
+        "num_layers": max(layers.values()) + 1 if layers else 0,
+        "num_sources": len(sources),
+        "num_sinks": len(sinks),
+    }
+
+
+def _analyze_with_condensation(G: nx.DiGraph) -> Dict[str, Any]:
+    """
+    Analyze a graph with cycles using condensation.
+
+    Strongly connected components are collapsed into super-nodes,
+    then DAG analysis runs on the condensation graph.
+    Results are mapped back to original nodes.
+    """
+    # Get SCCs and create mapping from node to SCC index
+    sccs = list(nx.strongly_connected_components(G))
+    node_to_scc: Dict[str, int] = {}
+    for i, scc in enumerate(sccs):
+        for node in scc:
+            node_to_scc[node] = i
+
+    # Create condensation graph
+    C = nx.condensation(G, scc=sccs)
+
+    # Run DAG analysis on condensation
+    c_depths = compute_dependency_depth(C)
+    c_layers = compute_topological_layers(C)
+
+    # Map results back to original nodes
+    depths: Dict[str, int] = {}
+    layers: Dict[str, int] = {}
+    for node in G.nodes():
+        scc_idx = node_to_scc[node]
+        depths[node] = c_depths.get(scc_idx, 0)
+        layers[node] = c_layers.get(scc_idx, 0)
+
+    # For other metrics, compute on original graph where possible
+    # Sources: nodes with no predecessors from outside their SCC
+    sources = []
+    sinks = []
+    for node in G.nodes():
+        scc_idx = node_to_scc[node]
+        preds_outside = [p for p in G.predecessors(node) if node_to_scc[p] != scc_idx]
+        succs_outside = [s for s in G.successors(node) if node_to_scc[s] != scc_idx]
+        if not preds_outside and c_depths.get(scc_idx, 0) == 0:
+            sources.append(node)
+        if not succs_outside and c_layers.get(scc_idx, 0) == max(c_layers.values(), default=0):
+            sinks.append(node)
+
+    # Widths can be computed directly
+    widths = {node: G.in_degree(node) for node in G.nodes()}
+
+    # Bottleneck and reachability are harder with cycles - use approximation
+    # For now, compute on condensation and map back
+    c_bottleneck = compute_bottleneck_scores(C)
+    c_reachability = compute_reachability_count(C)
+
+    bottleneck_scores: Dict[str, float] = {}
+    reachability: Dict[str, int] = {}
+    for node in G.nodes():
+        scc_idx = node_to_scc[node]
+        # Add SCC internal size to reachability
+        scc_size = len(sccs[scc_idx])
+        bottleneck_scores[node] = c_bottleneck.get(scc_idx, 0.0)
+        reachability[node] = c_reachability.get(scc_idx, 0) + scc_size - 1
+
+    # Critical path on condensation, then expand
+    c_critical_path = find_critical_path(C)
+    # Map back to original nodes (pick one representative per SCC)
+    critical_path = []
+    for scc_idx in c_critical_path:
+        # Pick a representative node from this SCC
+        representative = next(iter(sccs[scc_idx]))
+        critical_path.append(representative)
+
+    graph_depth = max(depths.values(), default=0)
+
+    return {
+        "is_dag": True,  # Treated as DAG via condensation
+        "has_cycles": True,  # Flag that original graph had cycles
+        "num_sccs_with_cycles": sum(1 for scc in sccs if len(scc) > 1),
         "depths": depths,
         "layers": layers,
         "sources": sources,
