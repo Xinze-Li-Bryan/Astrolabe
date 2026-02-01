@@ -32,15 +32,15 @@ export function SortableSection({ id, children, disabled, order }: SortableSecti
 
     return (
         <div ref={setNodeRef} style={style} className="relative group/section">
-            {/* Drag handle - positioned on the right */}
+            {/* Drag handle - positioned on the right, vertically centered */}
             {!disabled && (
                 <button
                     {...attributes}
                     {...listeners}
-                    className="absolute right-0 top-1.5 p-0.5 opacity-0 group-hover/section:opacity-100 text-white/30 hover:text-white/60 cursor-grab active:cursor-grabbing transition-opacity z-10"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 p-1 opacity-0 group-hover/section:opacity-100 text-white/40 hover:text-white/70 cursor-grab active:cursor-grabbing transition-opacity z-10"
                     title="Drag to reorder"
                 >
-                    <Bars3Icon className="w-3.5 h-3.5" />
+                    <Bars3Icon className="w-4 h-4" />
                 </button>
             )}
             {children}
