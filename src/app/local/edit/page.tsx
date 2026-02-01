@@ -43,7 +43,7 @@ import { LeanCodePanel } from '@/components/LeanCodePanel'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import { useCanvasStore, type SearchResult } from '@/lib/canvasStore'
 import { calculateNodeStatusLines } from '@/lib/successLines'
-import { readFile, readFullFile, updateNodeMeta, updateEdgeMeta, getViewport, updateViewport, type FileContent, type ViewportData } from '@/lib/api'
+import { readFile, readFullFile, updateNodeMeta, updateEdgeMeta, getViewport, updateViewport, getNamespaceIndex, buildNamespaceIndex, type FileContent, type ViewportData, type NamespaceLocation } from '@/lib/api'
 import type { Node, Edge } from '@/lib/store'
 
 // Dynamically import graph components
@@ -183,6 +183,10 @@ function LocalEditorContent() {
     // Independent code location for edge selection (overrides selectedNode location when set)
     const [codeLocation, setCodeLocation] = useState<{ filePath: string; lineNumber: number } | null>(null)
 
+    // Namespace index cache for fast "Jump to Code" from namespace bubbles
+    const [namespaceIndex, setNamespaceIndex] = useState<Map<string, NamespaceLocation>>(new Map())
+    const [lspBuilding, setLspBuilding] = useState(false)  // LSP index building in progress
+    const [lspStatus, setLspStatus] = useState<string | null>(null)  // LSP status message for bottom bar
 
     // Canvas store - manages on-demand added nodes
     // Note: Most mutation operations use graphActions for undo support
@@ -328,6 +332,64 @@ function LocalEditorContent() {
     useEffect(() => {
         hasAutoSelectedRef.current = false
     }, [projectPath])
+
+    // Load existing namespace index when project is ready (does NOT auto-build)
+    useEffect(() => {
+        if (!projectPath || graphLoading || needsInit) return
+
+        const loadNamespaceIndex = async () => {
+            try {
+                const result = await getNamespaceIndex(projectPath)
+                if (result.namespaces.length > 0) {
+                    const indexMap = new Map<string, NamespaceLocation>()
+                    for (const ns of result.namespaces) {
+                        indexMap.set(ns.name, ns)
+                    }
+                    setNamespaceIndex(indexMap)
+                    console.log(`[LSP] Loaded ${result.namespaces.length} namespaces from lsp.json`)
+                } else {
+                    console.log('[LSP] No lsp.json cache found. Click LSP button to build.')
+                }
+            } catch (error) {
+                console.warn('[LSP] Failed to load index:', error)
+            }
+        }
+
+        loadNamespaceIndex()
+    }, [projectPath, graphLoading, needsInit])
+
+    // Manual LSP build function
+    const handleBuildLsp = useCallback(async () => {
+        if (!projectPath || lspBuilding) return
+
+        setLspBuilding(true)
+        setLspStatus('Connecting to Lean LSP...')
+        console.log('[LSP] Building index...')
+
+        try {
+            setLspStatus('Building LSP cache (scanning files)...')
+            const result = await buildNamespaceIndex(projectPath)
+            console.log(`[LSP] Built index with ${result.count} namespaces, ${result.file_count} files`)
+            setLspStatus(`LSP cache built: ${result.count} namespaces`)
+
+            // Reload the index into memory
+            const loaded = await getNamespaceIndex(projectPath)
+            const indexMap = new Map<string, NamespaceLocation>()
+            for (const ns of loaded.namespaces) {
+                indexMap.set(ns.name, ns)
+            }
+            setNamespaceIndex(indexMap)
+
+            // Clear status after a short delay
+            setTimeout(() => setLspStatus(null), 3000)
+        } catch (error) {
+            console.error('[LSP] Failed to build index:', error)
+            setLspStatus('LSP build failed')
+            setTimeout(() => setLspStatus(null), 5000)
+        } finally {
+            setLspBuilding(false)
+        }
+    }, [projectPath, lspBuilding])
 
     // Status colors - from unified proof status config (memoized for performance)
     const statusColors: Record<string, string> = useMemo(() =>
@@ -1231,37 +1293,56 @@ function LocalEditorContent() {
             // Extract namespace from group id (format: "group:Namespace.Path")
             const namespace = node.id.replace('group:', '')
 
-            // Find the earliest node in this namespace (by file path + line number)
-            // This gets us closest to the namespace definition or first usage
-            const nodesInNamespace = graphNodes
-                .filter(gn => gn.name.startsWith(namespace + '.') && gn.leanFilePath && gn.leanLineNumber)
-                .sort((a, b) => {
-                    // Sort by file path first, then by line number
-                    if (a.leanFilePath !== b.leanFilePath) {
-                        return (a.leanFilePath || '').localeCompare(b.leanFilePath || '')
-                    }
-                    return (a.leanLineNumber || 0) - (b.leanLineNumber || 0)
-                })
-
-            // Take the node with the earliest line number (closest to namespace declaration)
-            const firstNodeWithFile = nodesInNamespace[0]
-
-            console.log('[handleCanvasNodeClick] Bubble clicked:', namespace, 'Found', nodesInNamespace.length, 'nodes, first:', firstNodeWithFile?.name, 'at line', firstNodeWithFile?.leanLineNumber)
-
-            // Create a fake GraphNode for the namespace bubble
-            const fakeGraphNode: GraphNode = {
-                id: node.id,
-                name: namespace,  // Just the namespace name
-                type: 'structure',  // Use 'structure' as closest match for namespace
-                status: 'stated',  // Namespaces don't have proof status
-                notes: undefined,
-                // Use first node's file location for code navigation
-                leanFilePath: firstNodeWithFile?.leanFilePath,
-                leanLineNumber: firstNodeWithFile?.leanLineNumber,
-            }
-            selectNode(fakeGraphNode)
-            // Focus camera on the bubble
+            // Focus camera on the bubble immediately
             setFocusNodeId(node.id)
+
+            // Fast path: check local cache first
+            const cached = namespaceIndex.get(namespace)
+            if (cached?.file_path && cached?.line_number) {
+                console.log('[handleCanvasNodeClick] Using cached namespace location:', namespace)
+                setCodeLocation({ filePath: cached.file_path, lineNumber: cached.line_number })
+                setCodeViewerOpen(true)
+                return
+            }
+
+            // Slow path: fetch from API (uses backend cache or LSP)
+            const fetchNamespaceDeclaration = async () => {
+                try {
+                    const response = await fetch(
+                        `http://127.0.0.1:8765/api/project/namespace-declaration?` +
+                        `path=${encodeURIComponent(projectPath)}&namespace=${encodeURIComponent(namespace)}`
+                    )
+                    if (response.ok) {
+                        const data = await response.json()
+                        console.log('[handleCanvasNodeClick] Namespace declaration from API:', namespace, data)
+                        return { filePath: data.file_path, lineNumber: data.line_number }
+                    }
+                } catch (error) {
+                    console.log('[handleCanvasNodeClick] API failed, falling back:', error)
+                }
+
+                // Fallback: Find the earliest node in this namespace
+                const nodesInNamespace = graphNodes
+                    .filter(gn => gn.name.startsWith(namespace + '.') && gn.leanFilePath && gn.leanLineNumber)
+                    .sort((a, b) => {
+                        if (a.leanFilePath !== b.leanFilePath) {
+                            return (a.leanFilePath || '').localeCompare(b.leanFilePath || '')
+                        }
+                        return (a.leanLineNumber || 0) - (b.leanLineNumber || 0)
+                    })
+                const firstNode = nodesInNamespace[0]
+                console.log('[handleCanvasNodeClick] Fallback to first node:', firstNode?.name)
+                return { filePath: firstNode?.leanFilePath, lineNumber: firstNode?.leanLineNumber }
+            }
+
+            // Start async fetch and update code viewer directly
+            fetchNamespaceDeclaration().then(({ filePath, lineNumber }) => {
+                if (filePath && lineNumber) {
+                    setCodeLocation({ filePath, lineNumber })
+                    setCodeViewerOpen(true)
+                    console.log('[handleCanvasNodeClick] Opening code at:', filePath, lineNumber)
+                }
+            })
             return
         }
 
@@ -2594,6 +2675,32 @@ $$F_c = k_c \\cdot d_{center}$$
                                         setCodeLocation({ filePath, lineNumber })
                                         setCodeViewerOpen(true)
                                     }}
+                                    onJumpToNamespace={async (namespace) => {
+                                        // Fetch namespace declaration from LSP API
+                                        try {
+                                            const response = await fetch(
+                                                `http://127.0.0.1:8765/api/project/namespace-declaration?` +
+                                                `path=${encodeURIComponent(projectPath)}&namespace=${encodeURIComponent(namespace)}`
+                                            )
+                                            if (response.ok) {
+                                                const data = await response.json()
+                                                console.log('[onJumpToNamespace] LSP result:', namespace, data)
+                                                setCodeLocation({ filePath: data.file_path, lineNumber: data.line_number })
+                                                setCodeViewerOpen(true)
+                                                return
+                                            }
+                                        } catch (error) {
+                                            console.log('[onJumpToNamespace] LSP API failed:', error)
+                                        }
+                                        // Fallback: find first node in namespace
+                                        const firstNode = graphNodes
+                                            .filter(n => n.name.startsWith(namespace + '.') && n.leanFilePath && n.leanLineNumber)
+                                            .sort((a, b) => (a.leanLineNumber || 0) - (b.leanLineNumber || 0))[0]
+                                        if (firstNode?.leanFilePath && firstNode?.leanLineNumber) {
+                                            setCodeLocation({ filePath: firstNode.leanFilePath, lineNumber: firstNode.leanLineNumber })
+                                            setCodeViewerOpen(true)
+                                        }
+                                    }}
                                 />
                             ) : (
                                 <SigmaGraph
@@ -2632,6 +2739,27 @@ $$F_c = k_c \\cdot d_{center}$$
                                         </div>
                                     )}
                                 </div>
+
+                                {/* LSP button - build/refresh namespace index */}
+                                <button
+                                    onClick={handleBuildLsp}
+                                    disabled={lspBuilding || graphLoading}
+                                    className={`p-1.5 rounded transition-colors disabled:opacity-50 ${
+                                        namespaceIndex.size > 0
+                                            ? 'bg-green-900/60 hover:bg-green-800/60'
+                                            : 'bg-black/60 hover:bg-white/20'
+                                    }`}
+                                    title={namespaceIndex.size > 0
+                                        ? `${namespaceIndex.size} namespaces cached`
+                                        : 'Load LSP'
+                                    }
+                                >
+                                    <span className={`text-xs font-mono ${lspBuilding ? 'animate-pulse' : ''} ${
+                                        namespaceIndex.size > 0 ? 'text-green-400' : 'text-white/60'
+                                    }`}>
+                                        LSP
+                                    </span>
+                                </button>
 
                                 {/* Refresh button */}
                                 <button
@@ -3709,6 +3837,18 @@ $$F_c = k_c \\cdot d_{center}$$
                 onClose={closeLensPicker}
                 nodeCount={canvasNodes.length}
             />
+
+            {/* LSP Status Bar - bottom */}
+            {lspStatus && (
+                <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 border-t border-white/10 px-4 py-2">
+                    <div className="flex items-center gap-2 text-xs text-white/70">
+                        {lspBuilding && (
+                            <div className="w-3 h-3 border-2 border-green-400/30 border-t-green-400 rounded-full animate-spin" />
+                        )}
+                        <span className={lspBuilding ? 'animate-pulse' : ''}>{lspStatus}</span>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

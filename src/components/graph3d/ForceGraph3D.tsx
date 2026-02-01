@@ -76,6 +76,7 @@ interface ForceGraph3DProps {
   getPositionsRef?: React.MutableRefObject<(() => Map<string, [number, number, number]>) | null>  // Ref to get current positions
   nodeCommunities?: Map<string, number> | null  // Node community assignments for community-aware layout
   onJumpToCode?: (filePath: string, lineNumber: number) => void  // Jump to code location
+  onJumpToNamespace?: (namespace: string) => void  // Jump to namespace declaration (via LSP)
 }
 
 // Camera focus control
@@ -875,6 +876,7 @@ export function ForceGraph3D({
   getPositionsRef,
   nodeCommunities,
   onJumpToCode,
+  onJumpToNamespace,
 }: ForceGraph3DProps) {
   const positionsRef = useRef<Map<string, [number, number, number]>>(new Map())
 
@@ -1432,8 +1434,9 @@ export function ForceGraph3D({
             nodeIds={contextMenu.group.nodeIds}
             isExpanded={contextMenu.group.expanded}
             onClose={closeContextMenu}
+            onJumpToNamespace={onJumpToNamespace}
             onJumpToCode={onJumpToCode ? (nodeId: string) => {
-              // Find the node and call onJumpToCode with its file location
+              // Find the node and call onJumpToCode with its file location (fallback)
               const node = allNodes.find(n => n.id === nodeId)
               if (node?.filePath && node?.lineNumber) {
                 onJumpToCode(node.filePath, node.lineNumber)

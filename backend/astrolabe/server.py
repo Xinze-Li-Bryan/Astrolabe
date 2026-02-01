@@ -37,6 +37,12 @@ from .analysis import (
 )
 from .analysis.entropy import random_graph_baseline
 from .analysis.degree import compute_degree_shannon_entropy
+from .lean_lsp import LeanLSPClient, NamespaceInfo
+from .lsp_cache import (
+    LSPCache,
+    get_lsp_cache_path,
+    build_lsp_cache,
+)
 
 
 # Project cache
@@ -523,6 +529,283 @@ async def search_nodes(
         del r["score"]
 
     return {"results": results, "total": len(results)}
+
+
+# ============================================
+# Namespace API
+# ============================================
+
+# Cache for LSP clients (one per project)
+_lsp_clients: dict[str, LeanLSPClient] = {}
+# Cache for namespace info (per file, not whole project)
+_namespace_file_cache: dict[str, dict[str, NamespaceInfo]] = {}
+
+
+async def _get_or_create_lsp_client(project_path: str) -> LeanLSPClient:
+    """Get or create an LSP client for the project"""
+    if project_path not in _lsp_clients:
+        client = LeanLSPClient(Path(project_path))
+        await client.start()
+        _lsp_clients[project_path] = client
+    return _lsp_clients[project_path]
+
+
+async def _get_namespaces_for_file(project_path: str, file_path: str) -> dict[str, NamespaceInfo]:
+    """Get namespaces from a specific file, using cache"""
+    cache_key = file_path
+    if cache_key in _namespace_file_cache:
+        return _namespace_file_cache[cache_key]
+
+    client = await _get_or_create_lsp_client(project_path)
+    namespaces = await client.get_namespaces(Path(file_path))
+    _namespace_file_cache[cache_key] = namespaces
+    return namespaces
+
+
+def _find_file_for_namespace(project: Project, namespace: str) -> Optional[str]:
+    """Find the file that contains nodes in this namespace"""
+    # Look for nodes that start with "namespace." or equal "namespace"
+    # Use node.name which matches how frontend extracts namespaces
+    prefix = namespace + "."
+
+    # Find earliest node (by line number) in this namespace
+    best_file = None
+    best_line = float('inf')
+
+    for node in project.nodes.values():
+        if node.name.startswith(prefix) or node.name == namespace:
+            if node.file_path and node.line_number:
+                if node.line_number < best_line:
+                    best_line = node.line_number
+                    best_file = node.file_path
+
+    return best_file
+
+
+@app.get("/api/project/namespace-declaration")
+async def get_namespace_declaration(
+    path: str = Query(..., description="Project path"),
+    namespace: str = Query(..., description="Namespace name (e.g., 'Chapter11' or 'Foo.Bar')"),
+):
+    """
+    Get the declaration location for a namespace.
+
+    Returns the file path and line number where the namespace is declared.
+    This is useful for "Jump to Code" functionality when clicking namespace bubbles.
+
+    Priority:
+    1. Check namespace_index.json (fast, pre-computed)
+    2. Fall back to LSP query (slower, but always accurate)
+
+    Returns:
+        {
+            "name": "Chapter11",
+            "file_path": "/path/to/file.lean",
+            "line_number": 19,
+            "is_explicit": true
+        }
+    """
+    # First, try to get from cached namespace index (fast path)
+    cache_path = get_lsp_cache_path(Path(path))
+    cache = LSPCache.load(cache_path)
+    index = cache.namespaces
+
+    if namespace in index:
+        return {"name": namespace, **index[namespace]}
+
+    # Fall back to LSP query (slow path)
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    # Find which file contains this namespace
+    file_path = _find_file_for_namespace(project, namespace)
+    if not file_path:
+        raise HTTPException(404, f"Namespace not found: {namespace}")
+
+    try:
+        # Get namespaces from that file
+        namespaces = await _get_namespaces_for_file(path, file_path)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get namespaces: {e}")
+
+    if namespace not in namespaces:
+        # Namespace might be implicit, return fallback based on first node
+        # Use node.name which matches how frontend extracts namespaces
+        for node in project.nodes.values():
+            if node.name.startswith(namespace + ".") and node.file_path and node.line_number:
+                return {
+                    "name": namespace,
+                    "file_path": node.file_path,
+                    "line_number": node.line_number,
+                    "is_explicit": False
+                }
+        raise HTTPException(404, f"Namespace not found: {namespace}")
+
+    return namespaces[namespace].to_dict()
+
+
+@app.get("/api/project/namespaces")
+async def get_all_namespaces_endpoint(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Get unique namespaces from the project's nodes.
+
+    This is a fast operation that extracts namespaces from existing node names,
+    without scanning all files via LSP.
+
+    Returns:
+        {
+            "namespaces": [
+                {"name": "Chapter11", "file_path": "...", "line_number": 19},
+                ...
+            ]
+        }
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    # Extract unique namespaces from node names
+    namespace_info: dict[str, dict] = {}
+
+    for node in project.nodes.values():
+        # Get namespace prefix from node name
+        if "." in node.name:
+            parts = node.name.rsplit(".", 1)
+            ns_name = parts[0]
+
+            # Track earliest occurrence
+            if ns_name not in namespace_info:
+                namespace_info[ns_name] = {
+                    "name": ns_name,
+                    "file_path": node.file_path,
+                    "line_number": node.line_number,
+                    "is_explicit": None  # Unknown without LSP
+                }
+            elif node.file_path and node.line_number:
+                existing = namespace_info[ns_name]
+                if existing["line_number"] is None or node.line_number < existing["line_number"]:
+                    namespace_info[ns_name]["file_path"] = node.file_path
+                    namespace_info[ns_name]["line_number"] = node.line_number
+
+    return {
+        "namespaces": list(namespace_info.values())
+    }
+
+
+@app.post("/api/project/namespaces/refresh")
+async def refresh_namespace_cache(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Clear namespace cache for a project.
+
+    Call this after significant code changes to update namespace info.
+    """
+    # Clear file caches for this project
+    keys_to_remove = [k for k in _namespace_file_cache.keys() if k.startswith(path)]
+    for key in keys_to_remove:
+        del _namespace_file_cache[key]
+
+    # Stop and remove old LSP client
+    if path in _lsp_clients:
+        await _lsp_clients[path].stop()
+        del _lsp_clients[path]
+
+    return {"status": "ok"}
+
+
+# ============================================
+# Namespace Index API (persistent cache)
+# ============================================
+
+
+@app.get("/api/project/namespace-index")
+async def get_namespace_index(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Get the cached LSP information for fast lookups.
+
+    Returns the namespace index from .astrolabe/lsp.json.
+    If the cache doesn't exist, returns an empty list.
+
+    Returns:
+        {
+            "namespaces": [
+                {"name": "Foo", "file_path": "...", "line_number": 10, "is_explicit": true},
+                ...
+            ],
+            "version": 2,
+            "built_at": "2026-02-01T16:00:00Z"
+        }
+    """
+    cache_path = get_lsp_cache_path(Path(path))
+    cache = LSPCache.load(cache_path)
+
+    # Convert dict to list format for frontend
+    namespaces = [
+        {"name": ns_name, **info}
+        for ns_name, info in cache.namespaces.items()
+    ]
+
+    return {
+        "namespaces": namespaces,
+        "version": cache.version,
+        "built_at": cache.built_at,
+        "file_count": len(cache.files),
+    }
+
+
+@app.post("/api/project/namespace-index/build")
+async def build_namespace_index_endpoint(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Build and save the complete LSP cache.
+
+    This scans all files in the project using the Lean LSP and collects:
+    - Document symbols (all declarations with hierarchy)
+    - Diagnostics (errors, warnings)
+    - Namespace index (extracted from symbols for fast lookup)
+
+    The result is saved to .astrolabe/lsp.json for fast future lookups.
+    This operation may take some time for large projects.
+
+    Returns:
+        {"status": "ok", "count": 123, "file_count": 45}
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    # Collect unique file paths from nodes
+    file_paths = set()
+    for node in project.nodes.values():
+        if node.file_path:
+            file_paths.add(node.file_path)
+
+    # Build complete LSP cache
+    cache = await build_lsp_cache(Path(path), list(file_paths))
+
+    # Save to file
+    cache_path = get_lsp_cache_path(Path(path))
+    cache.save(cache_path)
+
+    return {
+        "status": "ok",
+        "count": len(cache.namespaces),
+        "file_count": len(cache.files),
+        "built_at": cache.built_at,
+    }
 
 
 # ============================================

@@ -26,6 +26,7 @@ export interface BubbleContextMenuProps {
   // Callbacks
   onClose: () => void
   onJumpToCode?: (nodeId: string) => void
+  onJumpToNamespace?: (namespace: string) => void  // LSP-based namespace declaration jump
 }
 
 // Warning threshold for "Show All" action
@@ -41,6 +42,7 @@ export function BubbleContextMenu({
   isExpanded,
   onClose,
   onJumpToCode,
+  onJumpToNamespace,
 }: BubbleContextMenuProps) {
   // Use undoable actions for Cmd+Z support
   const { toggleGroupExpanded, setLensFocusNode, setActiveLens } = useLensActions()
@@ -86,13 +88,17 @@ export function BubbleContextMenu({
     onClose()
   }, [onClose])
 
-  // Jump to code - navigate to the first node's file
+  // Jump to code - navigate to namespace declaration (via LSP) or first node's file (fallback)
   const handleJumpToCode = useCallback(() => {
-    if (onJumpToCode && nodeIds.length > 0) {
+    // Prefer LSP-based namespace declaration for accurate positioning
+    if (onJumpToNamespace) {
+      onJumpToNamespace(namespace)
+    } else if (onJumpToCode && nodeIds.length > 0) {
+      // Fallback to first node's file
       onJumpToCode(nodeIds[0])
     }
     onClose()
-  }, [onJumpToCode, nodeIds, onClose])
+  }, [onJumpToNamespace, onJumpToCode, namespace, nodeIds, onClose])
 
   // Get last segment of namespace for display
   const shortName = namespace.split('.').pop() || namespace
@@ -133,7 +139,7 @@ export function BubbleContextMenu({
           </button>
         )}
 
-        {onJumpToCode && nodeIds.length > 0 && (
+        {(onJumpToNamespace || (onJumpToCode && nodeIds.length > 0)) && (
           <button
             onClick={handleJumpToCode}
             className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 hover:text-white flex items-center gap-2"
