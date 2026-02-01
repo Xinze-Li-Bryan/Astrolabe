@@ -134,8 +134,10 @@ export function useFileWatch(
         }
       };
 
-      ws.onerror = (error) => {
-        console.error("[FileWatch] Error:", error);
+      ws.onerror = () => {
+        // Use warn instead of error - connection failure is expected when backend is not running
+        // This prevents triggering Next.js error overlay for expected behavior
+        console.warn("[FileWatch] Connection failed - backend may not be running");
         setStatus("error");
         isConnectingRef.current = false;
       };

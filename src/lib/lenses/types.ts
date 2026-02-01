@@ -127,7 +127,7 @@ export const DEFAULT_LENS_OPTIONS: LensOptions = {
   nHop: 2,
   maxDepth: 10,
   namespaceDepth: 2,
-  collapseThreshold: 3,
+  collapseThreshold: 1,  // Always collapse - all namespaces become bubbles
 }
 
 // ============================================

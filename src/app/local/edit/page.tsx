@@ -1230,15 +1230,34 @@ function LocalEditorContent() {
         if (node.id.startsWith('group:')) {
             // Extract namespace from group id (format: "group:Namespace.Path")
             const namespace = node.id.replace('group:', '')
+
+            // Find the earliest node in this namespace (by file path + line number)
+            // This gets us closest to the namespace definition or first usage
+            const nodesInNamespace = graphNodes
+                .filter(gn => gn.name.startsWith(namespace + '.') && gn.leanFilePath && gn.leanLineNumber)
+                .sort((a, b) => {
+                    // Sort by file path first, then by line number
+                    if (a.leanFilePath !== b.leanFilePath) {
+                        return (a.leanFilePath || '').localeCompare(b.leanFilePath || '')
+                    }
+                    return (a.leanLineNumber || 0) - (b.leanLineNumber || 0)
+                })
+
+            // Take the node with the earliest line number (closest to namespace declaration)
+            const firstNodeWithFile = nodesInNamespace[0]
+
+            console.log('[handleCanvasNodeClick] Bubble clicked:', namespace, 'Found', nodesInNamespace.length, 'nodes, first:', firstNodeWithFile?.name, 'at line', firstNodeWithFile?.leanLineNumber)
+
             // Create a fake GraphNode for the namespace bubble
             const fakeGraphNode: GraphNode = {
                 id: node.id,
-                name: `📁 ${namespace}`,  // Add folder icon to indicate namespace
-                type: 'custom',  // Use 'custom' as namespace is a virtual node
-                status: 'unknown',
+                name: namespace,  // Just the namespace name
+                type: 'structure',  // Use 'structure' as closest match for namespace
+                status: 'stated',  // Namespaces don't have proof status
                 notes: undefined,
-                leanFilePath: undefined,
-                leanLineNumber: undefined,
+                // Use first node's file location for code navigation
+                leanFilePath: firstNodeWithFile?.leanFilePath,
+                leanLineNumber: firstNodeWithFile?.leanLineNumber,
             }
             selectNode(fakeGraphNode)
             // Focus camera on the bubble
@@ -2571,6 +2590,10 @@ $$F_c = k_c \\cdot d_{center}$$
                                     nodesWithHiddenNeighbors={nodesWithHiddenNeighbors}
                                     getPositionsRef={getPositionsRef}
                                     nodeCommunities={nodeCommunities}
+                                    onJumpToCode={(filePath, lineNumber) => {
+                                        setCodeLocation({ filePath, lineNumber })
+                                        setCodeViewerOpen(true)
+                                    }}
                                 />
                             ) : (
                                 <SigmaGraph
@@ -3382,7 +3405,7 @@ $$F_c = k_c \\cdot d_{center}$$
                                                                 endLine={codeFile.endLine}
                                                                 totalLines={codeFile.totalLines}
                                                                 nodeName={selectedNode?.name}
-                                                                nodeKind={selectedNode?.type}
+                                                                nodeKind={selectedNode?.id.startsWith('group:') ? 'namespace' : selectedNode?.type}
                                                                 onClose={() => setCodeViewerOpen(false)}
                                                                 hideHeader
                                                                 readOnly
