@@ -286,11 +286,20 @@ function LocalEditorContent() {
         '#06b6d4', // cyan
     ], [])
 
-    // Convert communities object to Map for ForceLayout
+    // Convert communities/clusters to Map for ForceLayout
+    // Uses current colorMappingMode to select appropriate clustering data
     const nodeCommunities = useMemo(() => {
-        if (!analysisData.communities) return null
-        return new Map(Object.entries(analysisData.communities))
-    }, [analysisData.communities])
+        if (colorMappingMode === 'spectral' && analysisData.spectralClusters) {
+            return new Map(Object.entries(analysisData.spectralClusters))
+        }
+        if (colorMappingMode === 'layer' && analysisData.layers) {
+            return new Map(Object.entries(analysisData.layers).map(([k, v]) => [k, v]))
+        }
+        if (analysisData.communities) {
+            return new Map(Object.entries(analysisData.communities))
+        }
+        return null
+    }, [colorMappingMode, analysisData.communities, analysisData.spectralClusters, analysisData.layers])
 
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
@@ -2066,17 +2075,19 @@ function LocalEditorContent() {
                                                             )}
                                                         </div>
 
-                                                        {/* Community Clustering */}
+                                                        {/* Community/Cluster Grouping */}
                                                         <div>
                                                             <div className="flex items-center gap-2">
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={physics.communityAwareLayout}
-                                                                    disabled={!analysisData.communities}
+                                                                    disabled={!nodeCommunities}
                                                                     onChange={(e) => updatePhysicsUndoable({ ...physics, communityAwareLayout: e.target.checked })}
                                                                     className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40 disabled:opacity-30"
                                                                 />
-                                                                <span className={`text-xs ${analysisData.communities ? 'text-white/80' : 'text-white/40'}`}>Community Clustering</span>
+                                                                <span className={`text-xs ${nodeCommunities ? 'text-white/80' : 'text-white/40'}`}>
+                                                                    {colorMappingMode === 'spectral' ? 'Spectral' : colorMappingMode === 'layer' ? 'Layer' : 'Community'} Clustering
+                                                                </span>
                                                                 <button
                                                                     onClick={() => setExpandedInfoTips(prev => {
                                                                         const next = new Set(prev)
@@ -2088,12 +2099,12 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {!analysisData.communities && (
+                                                            {!nodeCommunities && (
                                                                 <p className="text-[10px] text-amber-400/60 mt-1 ml-5">
                                                                     Run &quot;Compute Analysis&quot; to enable
                                                                 </p>
                                                             )}
-                                                            {physics.communityAwareLayout && analysisData.communities && (
+                                                            {physics.communityAwareLayout && nodeCommunities && (
                                                                 <div className="mt-2 ml-5">
                                                                     <input
                                                                         type="range"
