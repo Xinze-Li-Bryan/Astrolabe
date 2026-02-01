@@ -241,6 +241,7 @@ function LocalEditorContent() {
 
     // Analysis panel state
     const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree'>('default')
+    const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
     const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community'>('kind')
     const [analysisData, setAnalysisData] = useState<{
         pagerank?: Record<string, number>
@@ -945,25 +946,25 @@ function LocalEditorContent() {
         const isCanvasMode = !activeLensId || activeLensId === 'canvas'
 
         // Calculate size based on analysis mode
+        // Exponent controls contrast: lower = more contrast, higher = more uniform
+        // sizeContrast 0 → exponent 1.0 (uniform), sizeContrast 1 → exponent 0.2 (max contrast)
+        const sizeExponent = 1.0 - sizeContrast * 0.8
         const getNodeSize = (nodeId: string, metaSize?: number): number | undefined => {
             if (sizeMappingMode === 'pagerank' && analysisData.pagerank) {
                 const pr = analysisData.pagerank[nodeId]
                 if (pr !== undefined) {
-                    // Scale PageRank to size: use pow(0.4) for more dramatic scaling
-                    // Map to size range 0.3 to 5.0 for more visible differences
                     const maxPR = Math.max(...Object.values(analysisData.pagerank))
                     const minPR = Math.min(...Object.values(analysisData.pagerank))
                     const normalized = maxPR > minPR ? (pr - minPR) / (maxPR - minPR) : 0.5
-                    return 0.3 + Math.pow(normalized, 0.4) * 4.7
+                    return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
                 }
             }
             if (sizeMappingMode === 'indegree' && analysisData.indegree) {
                 const deg = analysisData.indegree[nodeId]
                 if (deg !== undefined) {
-                    // Scale in-degree to size using pow(0.4) for more dramatic scaling
                     const maxDeg = Math.max(...Object.values(analysisData.indegree))
                     const normalized = maxDeg > 0 ? deg / maxDeg : 0
-                    return 0.3 + Math.pow(normalized, 0.4) * 4.7
+                    return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
                 }
             }
             return metaSize // Use original meta size (undefined means use default)
@@ -1007,7 +1008,7 @@ function LocalEditorContent() {
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, analysisData.pagerank, analysisData.indegree, colorMappingMode, analysisData.communities, COMMUNITY_COLORS])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, colorMappingMode, analysisData.communities, COMMUNITY_COLORS])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -2165,6 +2166,24 @@ function LocalEditorContent() {
                                                                     </button>
                                                                 ))}
                                                             </div>
+                                                            {/* Size Contrast slider - only show when PageRank or In-degree is active */}
+                                                            {sizeMappingMode !== 'default' && (
+                                                                <div className="mt-2">
+                                                                    <input
+                                                                        type="range"
+                                                                        min="0"
+                                                                        max="1"
+                                                                        step="0.1"
+                                                                        value={sizeContrast}
+                                                                        onChange={(e) => setSizeContrast(parseFloat(e.target.value))}
+                                                                        className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                                                    />
+                                                                    <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                        <span>Uniform</span>
+                                                                        <span>Contrast</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
 
                                                         {/* Color Mapping (placeholder) */}
