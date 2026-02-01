@@ -32,7 +32,11 @@ from .analysis import (
     compute_betweenness_centrality,
     detect_communities_louvain,
     compute_clustering_coefficients,
+    compute_von_neumann_entropy,
+    compute_structure_entropy,
 )
+from .analysis.entropy import random_graph_baseline
+from .analysis.degree import compute_degree_shannon_entropy
 
 
 # Project cache
@@ -1728,6 +1732,79 @@ async def get_clustering_analysis(
         "numNodes": G.number_of_nodes(),
         "numEdges": G.number_of_edges(),
         "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/entropy")
+async def get_project_entropy(
+    path: str = Query(..., description="Project path"),
+    num_eigenvalues: int = Query(100, description="Number of eigenvalues for Von Neumann entropy"),
+    random_samples: int = Query(5, description="Number of random graph samples for baseline"),
+):
+    """
+    Compute entropy metrics for the project's dependency graph.
+
+    Returns:
+        - vonNeumann: Von Neumann entropy (based on graph Laplacian)
+        - shannon: Shannon entropy (based on degree distribution)
+        - effectiveDimension: exp(Von Neumann entropy)
+        - randomBaseline: Entropy of equivalent random graph (same n, m)
+        - normalizedEntropy: Von Neumann entropy / random baseline entropy
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    n = G.number_of_nodes()
+    m = G.number_of_edges()
+
+    # Compute Von Neumann entropy
+    vn_result = compute_von_neumann_entropy(G, num_eigenvalues=num_eigenvalues)
+    vn_entropy = vn_result["vonNeumannEntropy"]
+    vn_effective_dim = vn_result["effectiveDimension"]
+    vn_num_eigenvalues = len(vn_result["eigenvalues"])
+
+    # Compute Shannon entropy from degree distribution
+    shannon_entropy = compute_degree_shannon_entropy(G)
+
+    # Compute random graph baseline
+    baseline = random_graph_baseline(n, m, num_samples=random_samples)
+    baseline_vn_mean = baseline["vonNeumann"]["mean"]
+    baseline_vn_std = baseline["vonNeumann"]["std"]
+
+    # Normalized entropy (compared to random graph)
+    normalized = vn_entropy / baseline_vn_mean if baseline_vn_mean > 0 else 0.0
+
+    return {
+        "status": "ok",
+        "analysis": "entropy",
+        "numNodes": n,
+        "numEdges": m,
+        "data": {
+            "vonNeumann": {
+                "entropy": vn_entropy,
+                "numEigenvalues": vn_num_eigenvalues,
+                "effectiveDimension": vn_effective_dim,
+            },
+            "shannon": {
+                "entropy": shannon_entropy,
+                "description": "Entropy of degree distribution",
+            },
+            "randomBaseline": {
+                "meanEntropy": baseline_vn_mean,
+                "stdEntropy": baseline_vn_std,
+                "numSamples": baseline["numSamples"],
+            },
+            "normalizedEntropy": normalized,
+            "interpretation": (
+                "low" if normalized < 0.8 else
+                "medium" if normalized < 1.2 else
+                "high"
+            ),
+        },
     }
 
 
