@@ -1038,10 +1038,12 @@ export function ForceLayout({
               const dy = nodePos.y - otherCentroid.y
               const dz = nodePos.z - otherCentroid.z
               const distSq = dx * dx + dy * dy + dz * dz
-              const dist = Math.sqrt(distSq) || 0.1
+              const dist = Math.sqrt(distSq)
 
-              // Inverse distance force (similar to inter-cluster repulsion)
-              const force = physics.communitySeparation / (dist * 0.5 + 1)
+              if (dist < 0.1) continue  // Skip if too close
+
+              // Inverse square falloff - decays quickly with distance (same as namespace clustering)
+              const force = physics.communitySeparation / (distSq + 1)
               f[0] += (dx / dist) * force
               f[1] += (dy / dist) * force
               f[2] += (dz / dist) * force
