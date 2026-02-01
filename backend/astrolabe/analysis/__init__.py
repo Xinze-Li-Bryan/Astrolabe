@@ -7,6 +7,7 @@ Provides graph-theoretic analysis of Lean dependency graphs:
 - Clustering coefficients
 - Community detection (Louvain)
 - Graph entropy (Von Neumann, Shannon)
+- DAG-specific analysis (depth, layers, bottlenecks, critical path)
 """
 
 from .graph_builder import build_networkx_graph, GraphStats
@@ -31,6 +32,21 @@ from .entropy import (
     compute_von_neumann_entropy,
     compute_structure_entropy,
 )
+from .dag import (
+    compute_dependency_depth,
+    compute_topological_layers,
+    get_nodes_by_layer,
+    find_sources,
+    find_sinks,
+    compute_source_sink_stats,
+    compute_proof_width,
+    compute_bottleneck_scores,
+    compute_reachability_count,
+    find_critical_path,
+    find_critical_path_to,
+    compute_graph_depth,
+    analyze_dag,
+)
 
 __all__ = [
     # Graph builder
@@ -52,4 +68,18 @@ __all__ = [
     # Entropy
     "compute_von_neumann_entropy",
     "compute_structure_entropy",
+    # DAG analysis
+    "compute_dependency_depth",
+    "compute_topological_layers",
+    "get_nodes_by_layer",
+    "find_sources",
+    "find_sinks",
+    "compute_source_sink_stats",
+    "compute_proof_width",
+    "compute_bottleneck_scores",
+    "compute_reachability_count",
+    "find_critical_path",
+    "find_critical_path_to",
+    "compute_graph_depth",
+    "analyze_dag",
 ]

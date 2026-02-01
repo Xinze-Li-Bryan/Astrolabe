@@ -2091,6 +2091,142 @@ async def get_project_entropy(
     }
 
 
+@app.get("/api/project/analysis/dag")
+async def get_dag_analysis(
+    path: str = Query(..., description="Project path"),
+    include_all_depths: bool = Query(False, description="Include depth for all nodes"),
+    include_all_scores: bool = Query(False, description="Include bottleneck scores for all nodes"),
+    top_k: int = Query(20, description="Number of top nodes to return for each metric"),
+):
+    """
+    Get DAG-specific analysis for the project dependency graph.
+
+    DAG analysis is specialized for formal mathematics dependency structures,
+    providing insights into proof depth, bottlenecks, and critical paths.
+
+    Returns:
+        - sources: Root nodes (axioms, definitions with no dependencies)
+        - sinks: Terminal nodes (not used by other theorems)
+        - graphDepth: Length of the longest dependency chain
+        - criticalPath: The longest dependency chain (node IDs)
+        - layers: Number of topological layers
+        - topDeepNodes: Nodes with highest dependency depth
+        - topBottlenecks: Nodes with highest bottleneck score
+        - topReachability: Nodes that can reach the most other nodes
+    """
+    from .analysis.dag import (
+        analyze_dag,
+        compute_dependency_depth,
+        compute_bottleneck_scores,
+        compute_reachability_count,
+    )
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    # Run full DAG analysis
+    result = analyze_dag(G)
+
+    if not result.get("is_dag", False):
+        return {
+            "status": "error",
+            "analysis": "dag",
+            "error": result.get("error", "Graph contains cycles"),
+            "numNodes": G.number_of_nodes(),
+            "numEdges": G.number_of_edges(),
+        }
+
+    # Prepare top nodes by depth
+    depths = result["depths"]
+    sorted_by_depth = sorted(depths.items(), key=lambda x: -x[1])[:top_k]
+
+    # Prepare top bottlenecks
+    bottlenecks = result["bottleneck_scores"]
+    sorted_bottlenecks = sorted(bottlenecks.items(), key=lambda x: -x[1])[:top_k]
+
+    # Prepare top reachability
+    reachability = result["reachability"]
+    sorted_reachability = sorted(reachability.items(), key=lambda x: -x[1])[:top_k]
+
+    response_data = {
+        "isDAG": True,
+        "sources": result["sources"],
+        "sinks": result["sinks"],
+        "numSources": result["num_sources"],
+        "numSinks": result["num_sinks"],
+        "graphDepth": result["graph_depth"],
+        "numLayers": result["num_layers"],
+        "criticalPath": result["critical_path"],
+        "topDeepNodes": [{"nodeId": n, "depth": d} for n, d in sorted_by_depth],
+        "topBottlenecks": [{"nodeId": n, "score": s} for n, s in sorted_bottlenecks],
+        "topReachability": [{"nodeId": n, "count": c} for n, c in sorted_reachability],
+    }
+
+    if include_all_depths:
+        response_data["allDepths"] = depths
+
+    if include_all_scores:
+        response_data["allBottleneckScores"] = bottlenecks
+        response_data["allReachability"] = reachability
+
+    return {
+        "status": "ok",
+        "analysis": "dag",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/critical-path")
+async def get_critical_path_to_node(
+    path: str = Query(..., description="Project path"),
+    target: str = Query(..., description="Target node ID"),
+):
+    """
+    Find the critical path (longest dependency chain) to a specific node.
+
+    This answers: "What is the deepest dependency chain to understand this theorem?"
+
+    Returns:
+        - path: List of node IDs forming the longest path to target
+        - length: Number of edges in the path
+    """
+    from .analysis.dag import find_critical_path_to
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    try:
+        critical_path = find_critical_path_to(G, target)
+        return {
+            "status": "ok",
+            "analysis": "critical-path",
+            "target": target,
+            "data": {
+                "path": critical_path,
+                "length": len(critical_path) - 1 if critical_path else 0,
+            },
+        }
+    except ValueError as e:
+        return {
+            "status": "error",
+            "analysis": "critical-path",
+            "target": target,
+            "error": str(e),
+        }
+
+
 # ============================================
 # Main Entry Point
 # ============================================
