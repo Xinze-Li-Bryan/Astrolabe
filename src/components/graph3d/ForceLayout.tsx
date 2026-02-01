@@ -534,14 +534,13 @@ export function ForceLayout({
     const savedRatio = savedPositionCount / currentCount
 
     // Scale target radius based on node count - larger graphs need more spread
-    // But always respect the boundary constraint
+    // Note: Don't limit by boundaryRadius here - let nodes spread naturally during warmup.
+    // The boundary constraint in physics simulation will prevent escape, but won't compress.
     const edgeCount = edges.length
     const baseRadius = 12
     const dynamicRadius = Math.sqrt(currentCount) * physics.springLength * 0.5
     const maxRadius = edgeCount > 5000 ? 80 : edgeCount > 1000 ? 50 : 24
-    const boundaryRadius = physics.boundaryRadius ?? 50
-    // Target radius should not exceed boundary radius (with 10% margin for visual comfort)
-    const targetRadius = Math.min(boundaryRadius * 0.9, maxRadius, Math.max(baseRadius, dynamicRadius))
+    const targetRadius = Math.min(maxRadius, Math.max(baseRadius, dynamicRadius))
 
     // Calculate center of mass and max radius to detect dense graphs
     let cx = 0, cy = 0, cz = 0
