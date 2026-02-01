@@ -7,6 +7,9 @@ import { useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'rea
 import { useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableSection } from '@/components/ui/SortableSection'
 import {
     HomeIcon,
     MagnifyingGlassIcon,
@@ -241,6 +244,46 @@ function LocalEditorContent() {
             }
             return next
         })
+    }, [])
+
+    // Section order for drag-and-drop reordering
+    const defaultSectionOrder = ['graphSimplification', 'layoutOptimization', 'physics', 'analysis', 'actions']
+    const [sectionOrder, setSectionOrder] = useState<string[]>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('astrolabe-section-order')
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved)
+                    // Ensure all default sections are included (in case new ones were added)
+                    const merged = [...parsed.filter((s: string) => defaultSectionOrder.includes(s))]
+                    for (const s of defaultSectionOrder) {
+                        if (!merged.includes(s)) merged.push(s)
+                    }
+                    return merged
+                } catch { /* ignore */ }
+            }
+        }
+        return defaultSectionOrder
+    })
+
+    // Drag-and-drop sensors
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    )
+
+    // Handle drag end
+    const handleDragEnd = useCallback((event: DragEndEvent) => {
+        const { active, over } = event
+        if (over && active.id !== over.id) {
+            setSectionOrder(prev => {
+                const oldIndex = prev.indexOf(active.id as string)
+                const newIndex = prev.indexOf(over.id as string)
+                const newOrder = arrayMove(prev, oldIndex, newIndex)
+                localStorage.setItem('astrolabe-section-order', JSON.stringify(newOrder))
+                return newOrder
+            })
+        }
     }, [])
 
     // Analysis panel state
@@ -1927,9 +1970,12 @@ function LocalEditorContent() {
                                                 onNodeSelect={handleSearchResultSelect}
                                             />
                                         ) : (
-                                            <div className="h-full overflow-y-auto p-3 space-y-4">
+                                            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                                            <SortableContext items={sectionOrder} strategy={verticalListSortingStrategy}>
+                                            <div className="h-full overflow-y-auto p-3 flex flex-col gap-4">
                                                 {/* === GRAPH SIMPLIFICATION === */}
-                                                <div>
+                                                <SortableSection id="graphSimplification">
+                                                <div style={{ order: sectionOrder.indexOf('graphSimplification') }}>
                                                     <button
                                                         onClick={() => toggleSection('graphSimplification')}
                                                         className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
@@ -2009,10 +2055,12 @@ function LocalEditorContent() {
                                                     </div>
                                                     )}
                                                 </div>
+                                                </SortableSection>
 
                                                 {/* === LAYOUT OPTIMIZATION === */}
+                                                <SortableSection id="layoutOptimization" disabled={viewMode !== '3d'}>
                                                 {viewMode === '3d' && (
-                                                    <div className="border-t border-white/10 pt-3">
+                                                    <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('layoutOptimization') }}>
                                                         <div className="flex items-center gap-1">
                                                             <button
                                                                 onClick={() => toggleSection('layoutOptimization')}
@@ -2351,10 +2399,12 @@ function LocalEditorContent() {
                                                         )}
                                                     </div>
                                                 )}
+                                                </SortableSection>
 
                                                 {/* === PHYSICS === */}
+                                                <SortableSection id="physics" disabled={viewMode !== '3d'}>
                                                 {viewMode === '3d' && (
-                                                    <div className="border-t border-white/10 pt-3">
+                                                    <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('physics') }}>
                                                         <div className="flex items-center gap-1">
                                                             <button
                                                                 onClick={() => toggleSection('physics')}
@@ -2459,9 +2509,11 @@ function LocalEditorContent() {
                                                         )}
                                                     </div>
                                                 )}
+                                                </SortableSection>
 
                                                 {/* === ANALYSIS === */}
-                                                <div className="border-t border-white/10 pt-3">
+                                                <SortableSection id="analysis">
+                                                <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('analysis') }}>
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             onClick={() => toggleSection('analysis')}
@@ -2993,9 +3045,11 @@ $$F_c = k_c \\cdot d_{center}$$
                                                     </div>
                                                     )}
                                                 </div>
+                                                </SortableSection>
 
                                                 {/* === ACTIONS === */}
-                                                <div className="border-t border-white/10 pt-3">
+                                                <SortableSection id="actions">
+                                                <div className="border-t border-white/10 pt-3" style={{ order: sectionOrder.indexOf('actions') }}>
                                                     <button
                                                         onClick={() => toggleSection('actions')}
                                                         className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
@@ -3044,7 +3098,10 @@ $$F_c = k_c \\cdot d_{center}$$
                                                     </div>
                                                     )}
                                                 </div>
+                                                </SortableSection>
                                             </div>
+                                            </SortableContext>
+                                            </DndContext>
                                         )}
                                     </div>
                                 </div>
