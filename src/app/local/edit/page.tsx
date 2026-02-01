@@ -2365,14 +2365,15 @@ function LocalEditorContent() {
 
                                 {/* Refresh button */}
                                 <button
-                                    onClick={() => {
+                                    onClick={async () => {
                                         console.log('[Canvas] Refresh clicked')
-                                        reloadGraph()
+                                        await reloadGraph()  // Reload nodes/edges from backend
+                                        loadCanvas()         // Reload canvas state (positions, selected nodes)
                                         setSearchPanelKey(k => k + 1) // Reset SearchPanel state
                                     }}
                                     disabled={graphLoading}
                                     className="p-1.5 bg-black/60 hover:bg-white/20 rounded transition-colors disabled:opacity-50"
-                                    title="Refresh"
+                                    title="Refresh project and canvas"
                                 >
                                     <ArrowPathIcon className={`w-4 h-4 text-white/60 ${graphLoading ? 'animate-spin' : ''}`} />
                                 </button>
