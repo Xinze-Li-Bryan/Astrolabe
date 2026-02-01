@@ -31,6 +31,7 @@ from .analysis import (
     compute_pagerank,
     compute_betweenness_centrality,
     detect_communities_louvain,
+    compute_clustering_coefficients,
 )
 
 
@@ -1642,6 +1643,90 @@ async def get_community_detection(
         "numNodes": G.number_of_nodes(),
         "numEdges": G.number_of_edges(),
         "resolution": resolution,
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/clustering")
+async def get_clustering_analysis(
+    path: str = Query(..., description="Project path"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_local: bool = Query(False, description="Include all local coefficients (can be large)"),
+    include_namespaces: bool = Query(True, description="Include clustering by namespace"),
+):
+    """
+    Get clustering coefficient analysis for the project graph.
+
+    The clustering coefficient measures how much nodes tend to cluster together.
+    - Global (transitivity): Fraction of possible triangles that exist
+    - Local: For each node, what fraction of its neighbors are also connected
+    - By namespace: Average clustering within each namespace
+
+    In Lean projects, high clustering indicates tightly interconnected groups
+    of lemmas representing cohesive mathematical topics.
+
+    Args:
+        path: Project path
+        top_k: Number of top clustered nodes to return
+        include_local: If True, include local coefficients for all nodes
+        include_namespaces: If True, include clustering breakdown by namespace
+
+    Returns:
+        - globalCoefficient: Graph-wide transitivity
+        - averageCoefficient: Mean of local coefficients
+        - topNodes: Nodes with highest local clustering
+        - byNamespace: (optional) Average clustering per namespace
+        - local: (optional) All local coefficients
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = compute_clustering_coefficients(G, include_local=True)
+
+    # Get top-k nodes by local clustering (filter out nodes with degree < 2)
+    G_undirected = G.to_undirected() if G.is_directed() else G
+    degrees = dict(G_undirected.degree())
+
+    # Sort nodes by clustering, filter by min degree
+    sorted_nodes = sorted(
+        [(n, c) for n, c in result.local.items() if degrees.get(n, 0) >= 2],
+        key=lambda x: x[1],
+        reverse=True
+    )
+    top_nodes = [{"nodeId": n, "value": c, "degree": degrees.get(n, 0)}
+                 for n, c in sorted_nodes[:top_k]]
+
+    # Build response
+    response_data = {
+        "globalCoefficient": result.global_coefficient,
+        "averageCoefficient": result.average_coefficient,
+        "topNodes": top_nodes,
+    }
+
+    if include_namespaces:
+        # Sort namespaces by clustering coefficient
+        sorted_ns = sorted(
+            result.by_namespace.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        response_data["byNamespace"] = [
+            {"namespace": ns, "avgClustering": c, "nodeCount": sum(1 for n in result.local if n.startswith(ns + "."))}
+            for ns, c in sorted_ns[:50]  # Top 50 namespaces
+        ]
+
+    if include_local:
+        response_data["local"] = result.local
+
+    return {
+        "status": "ok",
+        "analysis": "clustering",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
         "data": response_data,
     }
 
