@@ -235,16 +235,73 @@ export function calculateSpawnPosition(
 /**
  * Calculate initial positions for batch of new nodes
  * Ensures they are evenly dispersed and don't overlap
+ *
+ * @param newNodeIds - IDs of nodes to spawn
+ * @param savedPositions - Saved positions from persistence layer
+ * @param existingPositions - Current positions of existing nodes
+ * @param edges - All edges for finding connections
+ * @param expansionOrigins - Optional map of nodeId -> position for nodes spawning from an expanded bubble
  */
 export function calculateBatchSpawnPositions(
   newNodeIds: string[],
   savedPositions: Map<string, Position3D | undefined>,
   existingPositions: PositionMap,
-  edges: Edge[]
+  edges: Edge[],
+  expansionOrigins?: Map<string, Position3D>
 ): Map<string, Position3D> {
   const result = new Map<string, Position3D>()
 
   if (newNodeIds.length === 0) return result
+
+  // If we have expansion origins, spawn all those nodes from their bubble's position
+  // This creates a natural "expand outward" animation
+  if (expansionOrigins && expansionOrigins.size > 0) {
+    // Group nodes by their expansion origin for even spreading
+    const nodesByOrigin = new Map<string, string[]>()
+    const nodesWithoutOrigin: string[] = []
+
+    for (const id of newNodeIds) {
+      const origin = expansionOrigins.get(id)
+      if (origin) {
+        const originKey = `${origin[0]},${origin[1]},${origin[2]}`
+        if (!nodesByOrigin.has(originKey)) {
+          nodesByOrigin.set(originKey, [])
+        }
+        nodesByOrigin.get(originKey)!.push(id)
+      } else {
+        nodesWithoutOrigin.push(id)
+      }
+    }
+
+    // Spawn nodes from their expansion origin with Fibonacci spread
+    for (const [originKey, nodeIds] of nodesByOrigin) {
+      const [x, y, z] = originKey.split(',').map(Number) as [number, number, number]
+      const originPos: Position3D = [x, y, z]
+
+      nodeIds.forEach((id, index) => {
+        // Use Fibonacci sphere for uniform spread around the origin
+        const dir = fibonacciSphere(index, Math.max(nodeIds.length, 12))
+
+        // Initial offset is small - physics will spread them further
+        const initialRadius = 2 + Math.random() * 2
+        const jitter = 0.5
+
+        result.set(id, [
+          originPos[0] + dir[0] * initialRadius + (Math.random() - 0.5) * jitter,
+          originPos[1] + dir[1] * initialRadius + (Math.random() - 0.5) * jitter,
+          originPos[2] + dir[2] * initialRadius + (Math.random() - 0.5) * jitter,
+        ])
+      })
+    }
+
+    // If there are nodes without expansion origin, process them normally below
+    if (nodesWithoutOrigin.length === 0) {
+      return result
+    }
+
+    // Continue with nodes that don't have expansion origins
+    newNodeIds = nodesWithoutOrigin
+  }
 
   // Calculate current graph state
   const { centroid, radius } = calculateGraphMetrics(existingPositions)
