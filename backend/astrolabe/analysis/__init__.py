@@ -56,6 +56,15 @@ from .structural import (
     compute_katz_centrality,
     analyze_structure,
 )
+from .advanced import (
+    compute_transitive_reduction,
+    get_transitive_edges,
+    compute_hierarchical_clustering,
+    cut_dendrogram,
+    compute_spectral_clustering,
+    compute_fiedler_vector,
+    analyze_advanced,
+)
 
 __all__ = [
     # Graph builder
@@ -99,4 +108,12 @@ __all__ = [
     "get_top_authorities",
     "compute_katz_centrality",
     "analyze_structure",
+    # Advanced analysis
+    "compute_transitive_reduction",
+    "get_transitive_edges",
+    "compute_hierarchical_clustering",
+    "cut_dendrogram",
+    "compute_spectral_clustering",
+    "compute_fiedler_vector",
+    "analyze_advanced",
 ]

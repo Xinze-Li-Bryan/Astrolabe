@@ -2333,6 +2333,154 @@ async def get_katz_centrality(
     }
 
 
+@app.get("/api/project/analysis/transitive-reduction")
+async def get_transitive_reduction(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Get transitive reduction of the dependency graph.
+
+    Identifies redundant (transitive) edges that can be removed
+    without changing reachability. Useful for simplifying visualization.
+
+    Returns:
+        - transitiveEdges: List of edges that are redundant
+        - numTransitiveEdges: Count of transitive edges
+        - reductionRatio: Percentage of edges that are transitive
+    """
+    from .analysis.advanced import get_transitive_edges
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    transitive = get_transitive_edges(G)
+    total_edges = G.number_of_edges()
+    reduction_ratio = len(transitive) / total_edges if total_edges > 0 else 0
+
+    return {
+        "status": "ok",
+        "analysis": "transitive-reduction",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": total_edges,
+        "data": {
+            "transitiveEdges": [{"source": s, "target": t} for s, t in transitive],
+            "numTransitiveEdges": len(transitive),
+            "reductionRatio": reduction_ratio,
+            "essentialEdges": total_edges - len(transitive),
+        },
+    }
+
+
+@app.get("/api/project/analysis/spectral")
+async def get_spectral_clustering(
+    path: str = Query(..., description="Project path"),
+    n_clusters: int = Query(5, description="Number of clusters"),
+):
+    """
+    Perform spectral clustering on the dependency graph.
+
+    Uses graph Laplacian eigenvectors for clustering.
+    May reveal structure that Louvain misses.
+
+    Returns:
+        - clusters: Mapping of node ID to cluster ID
+        - numClusters: Number of clusters found
+        - fiedlerVector: (optional) 2nd eigenvector for 2-way partitioning
+    """
+    from .analysis.advanced import compute_spectral_clustering, compute_fiedler_vector
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    clusters = compute_spectral_clustering(G, n_clusters=n_clusters)
+
+    # Group nodes by cluster
+    cluster_members = {}
+    for node, cid in clusters.items():
+        if cid not in cluster_members:
+            cluster_members[cid] = []
+        cluster_members[cid].append(node)
+
+    return {
+        "status": "ok",
+        "analysis": "spectral",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "nClusters": n_clusters,
+        "data": {
+            "clusters": clusters,
+            "numClusters": len(cluster_members),
+            "clusterSizes": {cid: len(members) for cid, members in cluster_members.items()},
+        },
+    }
+
+
+@app.get("/api/project/analysis/hierarchical")
+async def get_hierarchical_clustering(
+    path: str = Query(..., description="Project path"),
+    n_clusters: int = Query(5, description="Number of clusters to cut"),
+):
+    """
+    Perform hierarchical clustering on the dependency graph.
+
+    Produces nested community structure (dendrogram).
+
+    Returns:
+        - clusters: Flat clustering at specified level
+        - numClusters: Number of clusters
+    """
+    from .analysis.advanced import compute_hierarchical_clustering, cut_dendrogram
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    result = compute_hierarchical_clustering(G)
+
+    if len(result["labels"]) <= 1:
+        clusters = {label: 0 for label in result["labels"]}
+    else:
+        clusters = cut_dendrogram(
+            result["dendrogram"],
+            result["labels"],
+            n_clusters=n_clusters
+        )
+
+    # Group nodes by cluster
+    cluster_members = {}
+    for node, cid in clusters.items():
+        if cid not in cluster_members:
+            cluster_members[cid] = []
+        cluster_members[cid].append(node)
+
+    return {
+        "status": "ok",
+        "analysis": "hierarchical",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "nClusters": n_clusters,
+        "data": {
+            "clusters": clusters,
+            "numClusters": len(cluster_members),
+            "clusterSizes": {cid: len(members) for cid, members in cluster_members.items()},
+        },
+    }
+
+
 # ============================================
 # Main Entry Point
 # ============================================
