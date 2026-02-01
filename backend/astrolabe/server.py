@@ -30,6 +30,7 @@ from .analysis import (
     compute_degree_statistics,
     compute_pagerank,
     compute_betweenness_centrality,
+    detect_communities_louvain,
 )
 
 
@@ -1566,6 +1567,81 @@ async def get_betweenness_analysis(
         "numEdges": G.number_of_edges(),
         "sampled": sample_k is not None,
         "sampleSize": sample_k,
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/communities")
+async def get_community_detection(
+    path: str = Query(..., description="Project path"),
+    resolution: float = Query(1.0, description="Resolution parameter (higher = more communities)"),
+    include_partition: bool = Query(False, description="Include full node->community mapping"),
+    include_members: bool = Query(True, description="Include community member lists"),
+    top_k: int = Query(10, description="Number of top communities to show members for"),
+):
+    """
+    Detect communities using the Louvain algorithm.
+
+    Communities are groups of densely connected nodes. In Lean projects,
+    they represent clusters of related mathematical concepts.
+
+    Args:
+        path: Project path
+        resolution: Higher = more smaller communities, lower = fewer larger communities
+        include_partition: If True, include full node->community_id mapping
+        include_members: If True, include member lists for top communities
+        top_k: Number of top communities to include member lists for
+
+    Returns:
+        - numCommunities: Total number of communities found
+        - modularity: Quality score (0-1, higher = better separation)
+        - sizes: List of community sizes (sorted descending)
+        - communities: (optional) Top k communities with member lists
+        - partition: (optional) Full node->community_id mapping
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = detect_communities_louvain(G, resolution=resolution)
+
+    # Build response
+    response_data = {
+        "numCommunities": result.num_communities,
+        "modularity": result.modularity,
+        "sizes": result.sizes,
+    }
+
+    # Include top k communities with members
+    if include_members:
+        # Sort communities by size
+        sorted_communities = sorted(
+            result.communities.items(),
+            key=lambda x: len(x[1]),
+            reverse=True
+        )
+        top_communities = []
+        for comm_id, members in sorted_communities[:top_k]:
+            top_communities.append({
+                "id": comm_id,
+                "size": len(members),
+                "members": members,
+            })
+        response_data["topCommunities"] = top_communities
+
+    if include_partition:
+        response_data["partition"] = result.partition
+
+    return {
+        "status": "ok",
+        "analysis": "communities",
+        "algorithm": "louvain",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "resolution": resolution,
         "data": response_data,
     }
 
