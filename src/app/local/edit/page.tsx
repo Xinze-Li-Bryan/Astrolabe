@@ -1184,6 +1184,13 @@ function LocalEditorContent() {
         }
     }, [projectPath])
 
+    // Auto-compute analysis when project loads
+    useEffect(() => {
+        if (projectPath && astrolabeNodes.length > 0 && !analysisData.pagerank) {
+            computeAnalysis()
+        }
+    }, [projectPath, astrolabeNodes.length, analysisData.pagerank, computeAnalysis])
+
     // Handle node click (adapted to Node type)
     const handleCanvasNodeClick = useCallback((node: Node | null) => {
         // Clear edge selection when clicking on a node
@@ -2121,32 +2128,52 @@ function LocalEditorContent() {
 
                                                 {/* === ANALYSIS === */}
                                                 <div className="border-t border-white/10 pt-3">
-                                                    <button
-                                                        onClick={() => toggleSection('analysis')}
-                                                        className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
-                                                    >
-                                                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('analysis') ? '-rotate-90' : ''}`} />
-                                                        <ChartBarIcon className="w-4 h-4" />
-                                                        <span className="text-[10px] uppercase tracking-wider font-medium">Network Analysis</span>
-                                                    </button>
-                                                    {!collapsedSections.has('analysis') && (
-                                                    <div className="ml-5 mt-2 space-y-3">
-                                                        {/* Basic Stats */}
-                                                        <div className="text-xs text-white/60 space-y-1">
-                                                            <div className="flex justify-between">
-                                                                <span>Nodes:</span>
-                                                                <span className="text-white/80">{analysisData.nodeCount ?? astrolabeNodes.length}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => toggleSection('analysis')}
+                                                            className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                        >
+                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('analysis') ? '-rotate-90' : ''}`} />
+                                                            <ChartBarIcon className="w-4 h-4" />
+                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Network Analysis</span>
+                                                            {analysisLoading && (
+                                                                <div className="w-3 h-3 border-2 border-purple-300/30 border-t-purple-300 rounded-full animate-spin" />
+                                                            )}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setExpandedInfoTips(prev => {
+                                                                const next = new Set(prev)
+                                                                next.has('analysisStats') ? next.delete('analysisStats') : next.add('analysisStats')
+                                                                return next
+                                                            })}
+                                                            className="text-white/30 hover:text-white/60"
+                                                        >
+                                                            <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                    {/* Expandable Stats Info */}
+                                                    {expandedInfoTips.has('analysisStats') && (
+                                                        <div className="ml-5 mt-1 mb-2 text-[9px] text-white/40 bg-white/5 rounded p-2 space-y-2">
+                                                            <div>
+                                                                <span className="text-white/60">Density: {analysisData.density?.toFixed(4) ?? '—'}</span>
+                                                                <p className="mt-0.5">edges / (nodes × (nodes-1)), measures interconnectedness</p>
                                                             </div>
-                                                            <div className="flex justify-between">
-                                                                <span>Edges:</span>
-                                                                <span className="text-white/80">{analysisData.edgeCount ?? astrolabeEdges.length}</span>
+                                                            <div>
+                                                                <span className="text-white/60">PageRank</span>
+                                                                <p className="mt-0.5">Node importance based on incoming links and source importance</p>
                                                             </div>
-                                                            <div className="flex justify-between">
-                                                                <span>Density:</span>
-                                                                <span className="text-white/80">{analysisData.density?.toFixed(4) ?? '—'}</span>
+                                                            <div>
+                                                                <span className="text-white/60">In-degree</span>
+                                                                <p className="mt-0.5">Number of nodes that depend on this node</p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-white/60">Communities</span>
+                                                                <p className="mt-0.5">Louvain clustering groups related nodes. Modularity (0-1) measures separation quality</p>
                                                             </div>
                                                         </div>
-
+                                                    )}
+                                                    {!collapsedSections.has('analysis') && (
+                                                    <div className="ml-5 mt-2 space-y-3">
                                                         {/* Size Mapping */}
                                                         <div>
                                                             <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
@@ -2206,37 +2233,6 @@ function LocalEditorContent() {
                                                                 ))}
                                                             </div>
                                                         </div>
-
-                                                        {/* Compute Button */}
-                                                        <button
-                                                            onClick={computeAnalysis}
-                                                            disabled={analysisLoading || !projectPath}
-                                                            className="w-full py-1.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                                        >
-                                                            {analysisLoading ? (
-                                                                <>
-                                                                    <div className="w-3 h-3 border-2 border-purple-300/30 border-t-purple-300 rounded-full animate-spin" />
-                                                                    Computing...
-                                                                </>
-                                                            ) : (
-                                                                'Compute Analysis'
-                                                            )}
-                                                        </button>
-
-                                                        {/* Status indicators */}
-                                                        {(analysisData.pagerank || analysisData.communities) && (
-                                                            <div className="text-[10px] text-green-400/60 space-y-0.5">
-                                                                {analysisData.pagerank && (
-                                                                    <p>✓ PageRank ({Object.keys(analysisData.pagerank).length} nodes)</p>
-                                                                )}
-                                                                {analysisData.indegree && (
-                                                                    <p>✓ In-degree ({Object.keys(analysisData.indegree).length} nodes)</p>
-                                                                )}
-                                                                {analysisData.communities && (
-                                                                    <p>✓ Communities: {analysisData.communityCount} (mod: {analysisData.modularity?.toFixed(3)})</p>
-                                                                )}
-                                                            </div>
-                                                        )}
 
                                                     </div>
                                                     )}
