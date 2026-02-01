@@ -1976,14 +1976,16 @@ function LocalEditorContent() {
                                                 {/* === GRAPH SIMPLIFICATION === */}
                                                 <SortableSection id="graphSimplification" order={sectionOrder.indexOf('graphSimplification')}>
                                                 <div>
-                                                    <button
-                                                        onClick={() => toggleSection('graphSimplification')}
-                                                        className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
-                                                    >
-                                                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('graphSimplification') ? '-rotate-90' : ''}`} />
-                                                        <FunnelIcon className="w-4 h-4" />
-                                                        <span className="text-[10px] uppercase tracking-wider font-medium">Graph Simplification</span>
-                                                    </button>
+                                                    <div className="pr-5">
+                                                        <button
+                                                            onClick={() => toggleSection('graphSimplification')}
+                                                            className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                        >
+                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('graphSimplification') ? '-rotate-90' : ''}`} />
+                                                            <FunnelIcon className="w-4 h-4" />
+                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Graph Simplification</span>
+                                                        </button>
+                                                    </div>
                                                     {!collapsedSections.has('graphSimplification') && (
                                                     <div className="space-y-2 ml-5 mt-1">
                                                         {/* Hide Technical */}
@@ -2061,10 +2063,10 @@ function LocalEditorContent() {
                                                 <SortableSection id="layoutOptimization" disabled={viewMode !== '3d'} order={sectionOrder.indexOf('layoutOptimization')}>
                                                 {viewMode === '3d' && (
                                                     <div className="border-t border-white/10 pt-3">
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="flex items-center gap-1 pr-5">
                                                             <button
                                                                 onClick={() => toggleSection('layoutOptimization')}
-                                                                className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                                className="flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
                                                             >
                                                                 <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('layoutOptimization') ? '-rotate-90' : ''}`} />
                                                                 <CubeTransparentIcon className="w-4 h-4" />
@@ -2076,7 +2078,7 @@ function LocalEditorContent() {
                                                                     next.has('layoutOptimization') ? next.delete('layoutOptimization') : next.add('layoutOptimization')
                                                                     return next
                                                                 })}
-                                                                className="text-white/30 hover:text-white/60 p-1"
+                                                                className="text-white/30 hover:text-white/60"
                                                             >
                                                                 <InformationCircleIcon className="w-3.5 h-3.5" />
                                                             </button>
@@ -2405,10 +2407,10 @@ function LocalEditorContent() {
                                                 <SortableSection id="physics" disabled={viewMode !== '3d'} order={sectionOrder.indexOf('physics')}>
                                                 {viewMode === '3d' && (
                                                     <div className="border-t border-white/10 pt-3">
-                                                        <div className="flex items-center gap-1">
+                                                        <div className="flex items-center gap-1 pr-5">
                                                             <button
                                                                 onClick={() => toggleSection('physics')}
-                                                                className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                                className="flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
                                                             >
                                                                 <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('physics') ? '-rotate-90' : ''}`} />
                                                                 <BoltIcon className="w-4 h-4" />
@@ -2420,7 +2422,7 @@ function LocalEditorContent() {
                                                                     next.has('physics') ? next.delete('physics') : next.add('physics')
                                                                     return next
                                                                 })}
-                                                                className="text-white/30 hover:text-white/60 p-1"
+                                                                className="text-white/30 hover:text-white/60"
                                                             >
                                                                 <InformationCircleIcon className="w-3.5 h-3.5" />
                                                             </button>
@@ -2514,10 +2516,10 @@ function LocalEditorContent() {
                                                 {/* === ANALYSIS === */}
                                                 <SortableSection id="analysis" order={sectionOrder.indexOf('analysis')}>
                                                 <div className="border-t border-white/10 pt-3">
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-1 pr-5">
                                                         <button
                                                             onClick={() => toggleSection('analysis')}
-                                                            className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                            className="flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
                                                         >
                                                             <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('analysis') ? '-rotate-90' : ''}`} />
                                                             <ChartBarIcon className="w-4 h-4" />
@@ -3050,14 +3052,16 @@ $$F_c = k_c \\cdot d_{center}$$
                                                 {/* === ACTIONS === */}
                                                 <SortableSection id="actions" order={sectionOrder.indexOf('actions')}>
                                                 <div className="border-t border-white/10 pt-3">
-                                                    <button
-                                                        onClick={() => toggleSection('actions')}
-                                                        className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
-                                                    >
-                                                        <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('actions') ? '-rotate-90' : ''}`} />
-                                                        <WrenchScrewdriverIcon className="w-4 h-4" />
-                                                        <span className="text-[10px] uppercase tracking-wider font-medium">Actions</span>
-                                                    </button>
+                                                    <div className="pr-5">
+                                                        <button
+                                                            onClick={() => toggleSection('actions')}
+                                                            className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                        >
+                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('actions') ? '-rotate-90' : ''}`} />
+                                                            <WrenchScrewdriverIcon className="w-4 h-4" />
+                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Actions</span>
+                                                        </button>
+                                                    </div>
                                                     {!collapsedSections.has('actions') && (
                                                     <div className="ml-5 mt-1 space-y-2">
                                                     {viewMode === '3d' && (
