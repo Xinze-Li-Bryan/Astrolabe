@@ -233,7 +233,7 @@ function LocalEditorContent() {
     const [selectedNodesToRemove, setSelectedNodesToRemove] = useState<Set<string>>(new Set())
 
     // Settings panel collapsible sections
-    const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+    const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['graphSimplification', 'layoutOptimization', 'physics', 'analysis', 'actions']))
     const toggleSection = useCallback((section: string) => {
         setCollapsedSections(prev => {
             const next = new Set(prev)
