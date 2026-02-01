@@ -28,10 +28,10 @@ from datetime import datetime, timezone
 from typing import Optional
 from dataclasses import dataclass, field
 
-from .lean_lsp import LeanLSPClient
+from .lean_lsp import LeanLSPClient, infer_proof_status
 
 
-LSP_CACHE_VERSION = 2
+LSP_CACHE_VERSION = 3  # Bumped for node_statuses support
 
 # LSP Symbol kinds (from LSP spec)
 SYMBOL_KIND_NAMESPACE = 3
@@ -39,12 +39,117 @@ SYMBOL_KIND_CLASS = 5
 SYMBOL_KIND_FUNCTION = 12
 
 
+def match_diagnostics_to_symbols(
+    symbols: list,
+    diagnostics: list,
+    parent_name: str = ""
+) -> dict[str, list]:
+    """
+    Match diagnostics to symbols by line range.
+
+    Args:
+        symbols: List of symbol dicts with name, range, and optional children
+        diagnostics: List of diagnostic dicts with range and message
+        parent_name: Parent namespace prefix for nested symbols
+
+    Returns:
+        Dict mapping symbol name to list of diagnostics that fall within it.
+        Diagnostics outside all symbols go to "_file_" key.
+        Innermost symbol wins for nested ranges.
+    """
+    result: dict[str, list] = {}
+
+    # Build flat list of (name, start_line, end_line, depth) for matching
+    # Higher depth = more nested = higher priority
+    symbol_ranges = []
+
+    def collect_symbols(syms: list, depth: int = 0):
+        for sym in syms:
+            name = sym.get("name", "")
+
+            range_info = sym.get("range", {})
+            start_line = range_info.get("start", {}).get("line", 0)
+            end_line = range_info.get("end", {}).get("line", 0)
+
+            # Add this symbol with its depth
+            symbol_ranges.append((name, start_line, end_line, depth))
+
+            # Process children with increased depth
+            children = sym.get("children", [])
+            if children:
+                collect_symbols(children, depth + 1)
+
+    collect_symbols(symbols)
+
+    # Match each diagnostic to the innermost symbol (highest depth)
+    unmatched = []
+    for diag in diagnostics:
+        diag_line = diag.get("range", {}).get("start", {}).get("line", 0)
+
+        # Find all symbols containing this line
+        containing = [
+            (name, depth) for name, start, end, depth in symbol_ranges
+            if start <= diag_line <= end
+        ]
+
+        if containing:
+            # Pick the one with highest depth (innermost)
+            best_name = max(containing, key=lambda x: x[1])[0]
+            if best_name not in result:
+                result[best_name] = []
+            result[best_name].append(diag)
+        else:
+            unmatched.append(diag)
+
+    # Unmatched diagnostics go to _file_
+    if unmatched:
+        result["_file_"] = unmatched
+
+    return result
+
+
+def compute_node_statuses(matched_diagnostics: dict[str, list]) -> dict[str, str]:
+    """
+    Compute proof status for each node from matched diagnostics.
+
+    Args:
+        matched_diagnostics: Dict from match_diagnostics_to_symbols
+
+    Returns:
+        Dict mapping node name to status ("error", "sorry", or "proven")
+    """
+    statuses = {}
+    for name, diags in matched_diagnostics.items():
+        statuses[name] = infer_proof_status(diags)
+    return statuses
+
+
+def merge_node_statuses(
+    graph_statuses: dict[str, str],
+    lsp_statuses: dict[str, str]
+) -> dict[str, str]:
+    """
+    Merge LSP statuses with graph.json statuses.
+    LSP status takes priority when available.
+
+    Args:
+        graph_statuses: Statuses from graph.json (parsed from .ilean)
+        lsp_statuses: Statuses computed from LSP diagnostics
+
+    Returns:
+        Merged status dict with LSP taking priority
+    """
+    result = dict(graph_statuses)  # Start with graph statuses
+    result.update(lsp_statuses)     # LSP overwrites
+    return result
+
+
 @dataclass
 class LSPCache:
     """In-memory representation of LSP cache"""
     version: int = LSP_CACHE_VERSION
     built_at: Optional[str] = None
-    files: dict = field(default_factory=dict)  # file_path -> {symbols, diagnostics}
+    files: dict = field(default_factory=dict)  # file_path -> {symbols, diagnostics, node_statuses}
     namespaces: dict = field(default_factory=dict)  # namespace -> location info
 
     def add_file_symbols(self, file_path: str, symbols: list) -> None:
@@ -66,6 +171,25 @@ class LSPCache:
     def get_file_diagnostics(self, file_path: str) -> list:
         """Get diagnostics for a file"""
         return self.files.get(file_path, {}).get("diagnostics", [])
+
+    def get_node_statuses(self, file_path: str) -> dict[str, str]:
+        """Get computed node statuses for a file"""
+        return self.files.get(file_path, {}).get("node_statuses", {})
+
+    def compute_all_node_statuses(self) -> None:
+        """Compute and store node statuses for all files from diagnostics"""
+        for file_path, file_data in self.files.items():
+            symbols = file_data.get("symbols", [])
+            diagnostics = file_data.get("diagnostics", [])
+
+            # Match diagnostics to symbols
+            matched = match_diagnostics_to_symbols(symbols, diagnostics)
+
+            # Compute status for each node
+            statuses = compute_node_statuses(matched)
+
+            # Store in file data
+            file_data["node_statuses"] = statuses
 
     def rebuild_namespace_index(self) -> None:
         """Rebuild namespace index from symbols"""
