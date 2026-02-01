@@ -29,6 +29,7 @@ from .analysis import (
     build_networkx_graph,
     compute_degree_statistics,
     compute_pagerank,
+    compute_betweenness_centrality,
 )
 
 
@@ -1503,6 +1504,68 @@ async def get_pagerank_analysis(
         "numNodes": G.number_of_nodes(),
         "numEdges": G.number_of_edges(),
         "alpha": alpha,
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/betweenness")
+async def get_betweenness_analysis(
+    path: str = Query(..., description="Project path"),
+    k: int = Query(1000, description="Number of samples for approximation (0 = exact)"),
+    top_k: int = Query(20, description="Number of top nodes to return"),
+    include_all: bool = Query(False, description="Include all node values (can be large)"),
+):
+    """
+    Get Betweenness centrality analysis for the project graph.
+
+    Betweenness measures how often a node lies on shortest paths between other nodes.
+    High betweenness indicates "bridge" nodes that connect different parts of the graph.
+
+    In Lean projects, high betweenness indicates lemmas that bridge different
+    mathematical domains - "connector" results that link different areas.
+
+    Args:
+        path: Project path
+        k: Number of random samples for approximation (default 1000, 0 = exact calculation)
+        top_k: Number of top nodes to return
+        include_all: If True, include centrality values for all nodes
+
+    Returns:
+        - topNodes: List of top k nodes by betweenness
+        - mean: Mean betweenness value
+        - maxValue: Maximum betweenness value
+        - minValue: Minimum betweenness value
+        - values: (optional) All node betweenness values
+    """
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    # k=0 means exact calculation
+    sample_k = k if k > 0 else None
+    result = compute_betweenness_centrality(G, k=sample_k, top_k=top_k)
+
+    response_data = {
+        "topNodes": [{"nodeId": n, "value": v} for n, v in result.top_nodes],
+        "mean": result.mean,
+        "maxValue": result.max_value,
+        "minValue": result.min_value,
+    }
+
+    if include_all:
+        response_data["values"] = result.values
+
+    return {
+        "status": "ok",
+        "analysis": "betweenness",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "sampled": sample_k is not None,
+        "sampleSize": sample_k,
         "data": response_data,
     }
 
