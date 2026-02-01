@@ -2113,7 +2113,7 @@ function LocalEditorContent() {
                                                     >
                                                         <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('analysis') ? '-rotate-90' : ''}`} />
                                                         <ChartBarIcon className="w-4 h-4" />
-                                                        <span className="text-[10px] uppercase tracking-wider font-medium">🔬 Analysis</span>
+                                                        <span className="text-[10px] uppercase tracking-wider font-medium">Network Analysis</span>
                                                     </button>
                                                     {!collapsedSections.has('analysis') && (
                                                     <div className="ml-5 mt-2 space-y-3">
