@@ -2151,24 +2151,88 @@ function LocalEditorContent() {
                                                             <InformationCircleIcon className="w-3.5 h-3.5" />
                                                         </button>
                                                     </div>
-                                                    {/* Expandable Stats Info */}
+                                                    {/* Centered Modal Info */}
                                                     {expandedInfoTips.has('analysisStats') && (
-                                                        <div className="ml-5 mt-1 mb-2 text-[9px] text-white/40 bg-white/5 rounded p-2 space-y-2">
-                                                            <div>
-                                                                <span className="text-white/60">Density: {analysisData.density?.toFixed(4) ?? '—'}</span>
-                                                                <p className="mt-0.5">edges / (nodes × (nodes-1)), measures interconnectedness</p>
-                                                            </div>
-                                                            <div>
-                                                                <span className="text-white/60">PageRank</span>
-                                                                <p className="mt-0.5">Node importance based on incoming links and source importance</p>
-                                                            </div>
-                                                            <div>
-                                                                <span className="text-white/60">In-degree</span>
-                                                                <p className="mt-0.5">Number of nodes that depend on this node</p>
-                                                            </div>
-                                                            <div>
-                                                                <span className="text-white/60">Communities</span>
-                                                                <p className="mt-0.5">Louvain clustering groups related nodes. Modularity (0-1) measures separation quality</p>
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => {
+                                                                const next = new Set(prev)
+                                                                next.delete('analysisStats')
+                                                                return next
+                                                            })}
+                                                        >
+                                                            <div
+                                                                className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-xl w-full mx-4 max-h-[80vh] overflow-y-auto"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <h2 className="text-lg text-white font-medium mb-4">Network Analysis</h2>
+                                                                <div className="space-y-2">
+                                                                    {/* Graph Density */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Graph Density</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$D = \\frac{|E|}{|V| \\cdot (|V| - 1)}$$
+
+where $|E|$ = number of edges, $|V|$ = number of nodes.
+
+Ratio of actual edges to maximum possible edges. Higher = more interconnected.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* PageRank */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">PageRank</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$PR(u) = \\frac{1-d}{N} + d \\sum_{v \\in B_u} \\frac{PR(v)}{L(v)}$$
+
+- $PR(u)$ = PageRank of node $u$
+- $d = 0.85$ = damping factor
+- $N$ = total number of nodes
+- $B_u$ = set of nodes linking to $u$
+- $L(v)$ = outbound links from $v$
+
+A node is important if referenced by other important nodes.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* In-degree */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">In-degree Centrality</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$\\deg^{-}(v) = |\\{u : (u,v) \\in E\\}|$$
+
+Count of incoming edges. High in-degree = widely used/depended upon.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Community Detection */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Community Detection (Louvain)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$Q = \\frac{1}{2m} \\sum_{ij} \\left[ A_{ij} - \\frac{k_i k_j}{2m} \\right] \\delta(c_i, c_j)$$
+
+- $Q$ = modularity $\\in [0,1]$
+- $m$ = total edges
+- $A_{ij}$ = adjacency matrix
+- $k_i, k_j$ = node degrees
+- $\\delta(c_i, c_j)$ = 1 if same community
+
+Groups densely connected nodes. Higher $Q$ = better separation.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">
+                                                                    Click anywhere to close
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     )}
