@@ -129,6 +129,9 @@ export interface PhysicsParams {
   // Community clustering (direct forces)
   communityClusteringStrength: number
   communitySeparation: number
+  // Boundary constraint
+  boundaryRadius: number
+  boundaryStrength: number
 }
 
 /**

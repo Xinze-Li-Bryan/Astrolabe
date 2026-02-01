@@ -60,6 +60,9 @@ export interface PhysicsParams {
   // Community clustering (direct forces, like namespace clustering)
   communityClusteringStrength: number  // Force pulling nodes toward community centroid (default 0.3)
   communitySeparation: number          // Force pushing different communities apart (default 0.5)
+  // Boundary constraint
+  boundaryRadius: number               // Maximum distance from center (default 50)
+  boundaryStrength: number             // Force pushing nodes back inside boundary (default 2.0)
 }
 
 // Default physics parameters
@@ -85,6 +88,9 @@ export const DEFAULT_PHYSICS: PhysicsParams = {
   // Community clustering (direct forces)
   communityClusteringStrength: 0.3,
   communitySeparation: 0.5,
+  // Boundary constraint
+  boundaryRadius: 50,
+  boundaryStrength: 2.0,
 }
 
 interface ForceLayoutProps {
@@ -1051,6 +1057,27 @@ export function ForceLayout({
           }
         }
       }
+    }
+
+    // Boundary constraint - push nodes back if they exceed the boundary radius
+    const boundaryRadius = physics.boundaryRadius ?? 50
+    const boundaryStrength = physics.boundaryStrength ?? 2.0
+    if (boundaryRadius > 0 && boundaryStrength > 0) {
+      nodes.forEach((node) => {
+        const pos = positions.get(node.id)
+        const f = forces.get(node.id)
+        if (!pos || !f) return
+
+        const dist = Math.sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2])
+        if (dist > boundaryRadius) {
+          // Push back toward center with force proportional to how far outside the boundary
+          const overshoot = dist - boundaryRadius
+          const pushStrength = boundaryStrength * overshoot
+          f[0] -= (pos[0] / dist) * pushStrength
+          f[1] -= (pos[1] / dist) * pushStrength
+          f[2] -= (pos[2] / dist) * pushStrength
+        }
+      })
     }
 
     // Apply forces (Verlet integration)
