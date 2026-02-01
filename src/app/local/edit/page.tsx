@@ -2100,6 +2100,19 @@ function LocalEditorContent() {
                                                                 />
                                                                 <span className="text-[10px] text-white/60 w-8 text-right">{physics.damping.toFixed(2)}</span>
                                                             </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[10px] text-white/50 w-20">Boundary</span>
+                                                                <input
+                                                                    type="range"
+                                                                    min="20"
+                                                                    max="200"
+                                                                    step="10"
+                                                                    value={physics.boundaryRadius ?? 50}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, boundaryRadius: Number(e.target.value) })}
+                                                                    className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                />
+                                                                <span className="text-[10px] text-white/60 w-8 text-right">{physics.boundaryRadius ?? 50}</span>
+                                                            </div>
                                                         </div>
                                                         )}
                                                     </div>
