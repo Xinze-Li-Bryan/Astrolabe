@@ -1722,11 +1722,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('hideTechnical') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Hide auto-generated Lean nodes: type class instances, coercions, decidability proofs, and other implementation details.
-                                                                </p>
-                                                            )}
                                                         </div>
                                                         {/* Transitive Reduction */}
                                                         <div>
@@ -1749,11 +1744,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('transitiveReduction') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Remove redundant edges: if path A→B→C exists, hide the direct A→C edge. Shows only essential dependencies.
-                                                                </p>
-                                                            )}
                                                         </div>
                                                         {/* Hide Orphaned */}
                                                         <div>
@@ -1776,11 +1766,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('hideOrphaned') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Hide nodes that have no connections to other visible nodes. Useful for cleaning up isolated nodes.
-                                                                </p>
-                                                            )}
                                                         </div>
                                                     </div>
                                                     )}
@@ -1789,14 +1774,26 @@ function LocalEditorContent() {
                                                 {/* === LAYOUT OPTIMIZATION === */}
                                                 {viewMode === '3d' && (
                                                     <div className="border-t border-white/10 pt-3">
-                                                        <button
-                                                            onClick={() => toggleSection('layoutOptimization')}
-                                                            className="w-full flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
-                                                        >
-                                                            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('layoutOptimization') ? '-rotate-90' : ''}`} />
-                                                            <CubeTransparentIcon className="w-4 h-4" />
-                                                            <span className="text-[10px] uppercase tracking-wider font-medium">Layout Optimization</span>
-                                                        </button>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                onClick={() => toggleSection('layoutOptimization')}
+                                                                className="flex-1 flex items-center gap-2 py-1.5 text-white/60 hover:text-white/80 transition-colors group"
+                                                            >
+                                                                <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${collapsedSections.has('layoutOptimization') ? '-rotate-90' : ''}`} />
+                                                                <CubeTransparentIcon className="w-4 h-4" />
+                                                                <span className="text-[10px] uppercase tracking-wider font-medium">Layout Optimization</span>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setExpandedInfoTips(prev => {
+                                                                    const next = new Set(prev)
+                                                                    next.has('layoutOptimization') ? next.delete('layoutOptimization') : next.add('layoutOptimization')
+                                                                    return next
+                                                                })}
+                                                                className="text-white/30 hover:text-white/60 p-1"
+                                                            >
+                                                                <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
                                                         {!collapsedSections.has('layoutOptimization') && (
                                                         <div className="ml-5 mt-1">
                                                         {/* Namespace Clustering */}
@@ -1820,11 +1817,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('clustering') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Group nodes by Lean namespace. Nodes in the same module cluster together for better structure visualization.
-                                                                </p>
-                                                            )}
                                                             {physics.clusteringEnabled && (
                                                                 <div className="mt-2 ml-5 space-y-2">
                                                                     <div>
@@ -1894,65 +1886,8 @@ function LocalEditorContent() {
                                                             )}
                                                         </div>
 
-                                                        {/* Adaptive Springs */}
-                                                        <div>
-                                                            <div className="flex items-center gap-2">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={physics.adaptiveSpringEnabled}
-                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringEnabled: e.target.checked })}
-                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
-                                                                />
-                                                                <span className="text-xs text-white/80">Adaptive Springs</span>
-                                                                <button
-                                                                    onClick={() => setExpandedInfoTips(prev => {
-                                                                        const next = new Set(prev)
-                                                                        next.has('adaptiveSprings') ? next.delete('adaptiveSprings') : next.add('adaptiveSprings')
-                                                                        return next
-                                                                    })}
-                                                                    className="ml-auto text-white/30 hover:text-white/60"
-                                                                >
-                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
-                                                                </button>
-                                                            </div>
-                                                            {expandedInfoTips.has('adaptiveSprings') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    High-degree hub nodes get longer edges automatically, preventing star-shaped clustering around heavily referenced nodes.
-                                                                </p>
-                                                            )}
-                                                            {physics.adaptiveSpringEnabled && (
-                                                                <div className="mt-2 ml-5 space-y-2">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Mode</span>
-                                                                        <select
-                                                                            value={physics.adaptiveSpringMode}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' })}
-                                                                            className="flex-1 text-[10px] bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80"
-                                                                        >
-                                                                            <option value="sqrt">Square Root</option>
-                                                                            <option value="logarithmic">Logarithmic</option>
-                                                                            <option value="linear">Linear</option>
-                                                                        </select>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-[10px] text-white/40 w-14">Scale</span>
-                                                                        <input
-                                                                            type="range"
-                                                                            min="0"
-                                                                            max="10"
-                                                                            step="0.5"
-                                                                            value={physics.adaptiveSpringScale}
-                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringScale: Number(e.target.value) })}
-                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                                                                        />
-                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-
                                                         {/* Community Clustering */}
-                                                        <div className="mt-3">
+                                                        <div>
                                                             <div className="flex items-center gap-2">
                                                                 <input
                                                                     type="checkbox"
@@ -1973,11 +1908,6 @@ function LocalEditorContent() {
                                                                     <InformationCircleIcon className="w-3.5 h-3.5" />
                                                                 </button>
                                                             </div>
-                                                            {expandedInfoTips.has('communityClustering') && (
-                                                                <p className="text-[10px] text-white/40 mt-1 ml-5 bg-white/5 rounded p-2">
-                                                                    Group nodes by detected communities (Louvain algorithm). Requires running &quot;Compute Analysis&quot; first.
-                                                                </p>
-                                                            )}
                                                             {!analysisData.communities && (
                                                                 <p className="text-[10px] text-amber-400/60 mt-1 ml-5">
                                                                     Run &quot;Compute Analysis&quot; to enable
@@ -2004,6 +1934,58 @@ function LocalEditorContent() {
                                                                     <div className="flex justify-between text-[9px] text-white/30 mt-1">
                                                                         <span>Loose</span>
                                                                         <span>Clustered</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Adaptive Springs */}
+                                                        <div className="mt-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={physics.adaptiveSpringEnabled}
+                                                                    onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringEnabled: e.target.checked })}
+                                                                    className="rounded bg-white/20 border-white/30 text-white/80 focus:ring-white/40"
+                                                                />
+                                                                <span className="text-xs text-white/80">Adaptive Springs</span>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => {
+                                                                        const next = new Set(prev)
+                                                                        next.has('adaptiveSprings') ? next.delete('adaptiveSprings') : next.add('adaptiveSprings')
+                                                                        return next
+                                                                    })}
+                                                                    className="ml-auto text-white/30 hover:text-white/60"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3.5 h-3.5" />
+                                                                </button>
+                                                            </div>
+                                                            {physics.adaptiveSpringEnabled && (
+                                                                <div className="mt-2 ml-5 space-y-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Mode</span>
+                                                                        <select
+                                                                            value={physics.adaptiveSpringMode}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringMode: e.target.value as 'sqrt' | 'logarithmic' | 'linear' })}
+                                                                            className="flex-1 text-[10px] bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80"
+                                                                        >
+                                                                            <option value="sqrt">Square Root</option>
+                                                                            <option value="logarithmic">Logarithmic</option>
+                                                                            <option value="linear">Linear</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-white/40 w-14">Scale</span>
+                                                                        <input
+                                                                            type="range"
+                                                                            min="0"
+                                                                            max="10"
+                                                                            step="0.5"
+                                                                            value={physics.adaptiveSpringScale}
+                                                                            onChange={(e) => updatePhysicsUndoable({ ...physics, adaptiveSpringScale: Number(e.target.value) })}
+                                                                            className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                                                                        />
+                                                                        <span className="text-[10px] text-white/60 w-6 text-right">{physics.adaptiveSpringScale.toFixed(1)}</span>
                                                                     </div>
                                                                 </div>
                                                             )}
@@ -2036,11 +2018,6 @@ function LocalEditorContent() {
                                                                 <InformationCircleIcon className="w-3.5 h-3.5" />
                                                             </button>
                                                         </div>
-                                                        {expandedInfoTips.has('physics') && (
-                                                            <p className="text-[10px] text-white/40 mb-2 ml-5 bg-white/5 rounded p-2">
-                                                                Force-directed layout simulation parameters. Repulsion pushes nodes apart, springs pull connected nodes together, gravity pulls everything to center.
-                                                            </p>
-                                                        )}
                                                         {!collapsedSections.has('physics') && (
                                                         <div className="space-y-1.5 ml-5 mt-1">
                                                             <div className="flex items-center gap-2">
@@ -2165,7 +2142,12 @@ function LocalEditorContent() {
                                                                 className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-xl w-full mx-4 max-h-[80vh] overflow-y-auto"
                                                                 onClick={(e) => e.stopPropagation()}
                                                             >
-                                                                <h2 className="text-lg text-white font-medium mb-4">Network Analysis</h2>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Network Analysis</h2>
+                                                                <p className="text-sm text-white/60 mb-4">
+                                                                    Analyze the dependency graph structure using graph theory metrics.
+                                                                    Use <strong className="text-white/80">Size Mapping</strong> to visualize node importance,
+                                                                    and <strong className="text-white/80">Color Mapping</strong> to highlight community structure.
+                                                                </p>
                                                                 <div className="space-y-2">
                                                                     {/* Graph Density */}
                                                                     <details className="group">
@@ -2236,6 +2218,178 @@ Groups densely connected nodes. Higher $Q$ = better separation.`} />
                                                             </div>
                                                         </div>
                                                     )}
+                                                    {/* Other Info Modals */}
+                                                    {expandedInfoTips.has('hideTechnical') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('hideTechnical'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Hide Technical Nodes</h2>
+                                                                <p className="text-sm text-white/70">Hide auto-generated Lean nodes that are typically implementation details:</p>
+                                                                <ul className="mt-3 text-sm text-white/60 space-y-1 list-disc list-inside">
+                                                                    <li>Type class instances</li>
+                                                                    <li>Coercions</li>
+                                                                    <li>Decidability proofs</li>
+                                                                    <li>Other compiler-generated nodes</li>
+                                                                </ul>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('transitiveReduction') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('transitiveReduction'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Transitive Reduction</h2>
+                                                                <p className="text-sm text-white/70 mb-3">Remove redundant edges to show only essential dependencies.</p>
+                                                                <div className="bg-white/5 rounded-lg p-3 text-sm text-white/60">
+                                                                    <p className="font-medium text-white/80 mb-2">Example:</p>
+                                                                    <p>If path exists: A → B → C</p>
+                                                                    <p>Then hide direct edge: A → C</p>
+                                                                </div>
+                                                                <p className="text-sm text-white/50 mt-3">This reveals the true hierarchical structure of dependencies.</p>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('hideOrphaned') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('hideOrphaned'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Hide Orphaned Nodes</h2>
+                                                                <p className="text-sm text-white/70">Hide nodes that have no connections to other visible nodes.</p>
+                                                                <p className="text-sm text-white/50 mt-3">Useful for cleaning up isolated nodes that don&apos;t contribute to the dependency structure.</p>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('layoutOptimization') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('layoutOptimization'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Layout Optimization</h2>
+                                                                <p className="text-sm text-white/70 mb-3">
+                                                                    Apply additional forces to organize the graph layout beyond basic physics.
+                                                                </p>
+                                                                <ul className="text-sm text-white/60 space-y-2">
+                                                                    <li><strong className="text-white/80">Namespace Clustering:</strong> Group nodes by Lean module hierarchy</li>
+                                                                    <li><strong className="text-white/80">Community Clustering:</strong> Group by detected graph communities (Louvain)</li>
+                                                                    <li><strong className="text-white/80">Adaptive Springs:</strong> Longer edges for high-degree hub nodes</li>
+                                                                </ul>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('clustering') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('clustering'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Namespace Clustering</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Group nodes by their Lean namespace hierarchy. Nodes in the same module cluster together.</p>
+                                                                <MarkdownRenderer content={`**Force Model:**
+
+$$F_{attract} = \\frac{k}{d^2 + 1}$$
+
+$$F_{repel} = \\frac{s}{d^2 + 1}$$
+
+where:
+- $k$ = clustering strength
+- $s$ = cluster separation
+- $d$ = distance to/from centroid
+
+**Depth** controls the namespace level used for grouping (e.g., depth 2 groups \`Mathlib.Algebra\` separately from \`Mathlib.Analysis\`).`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('adaptiveSprings') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('adaptiveSprings'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Adaptive Edge Length</h2>
+                                                                <p className="text-sm text-white/70 mb-4">High-degree hub nodes get longer edges automatically, preventing star-shaped clustering.</p>
+                                                                <MarkdownRenderer content={`**Modes:**
+
+**Square Root** (recommended):
+$$L = L_0 + s \\cdot \\sqrt{\\deg(v)}$$
+
+**Logarithmic** (gentler scaling):
+$$L = L_0 + s \\cdot \\ln(\\deg(v) + 1)$$
+
+**Linear** (aggressive):
+$$L = L_0 + s \\cdot \\deg(v)$$
+
+where:
+- $L$ = final edge length
+- $L_0$ = base edge length
+- $s$ = scale factor
+- $\\deg(v)$ = degree of the hub node`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('communityClustering') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('communityClustering'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Community Clustering</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Group nodes by detected communities (from Louvain algorithm). Similar to namespace clustering but based on graph structure.</p>
+                                                                <MarkdownRenderer content={`**Force Model:**
+
+Same as namespace clustering, but uses community centroids instead of namespace centroids:
+
+$$F_{attract} = \\frac{k}{d^2 + 1}$$
+
+$$F_{repel} = \\frac{s}{d^2 + 1}$$
+
+**Requires** running Network Analysis first to detect communities.`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {expandedInfoTips.has('physics') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('physics'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Physics Simulation</h2>
+                                                                <p className="text-sm text-white/70 mb-4">Force-directed layout using a physics simulation.</p>
+                                                                <MarkdownRenderer content={`**Forces:**
+
+**Repulsion** (between all nodes):
+$$F_r = \\frac{k_r}{d^2}$$
+
+**Spring** (between connected nodes):
+$$F_s = k_s \\cdot (d - L_0)$$
+
+**Center Gravity**:
+$$F_c = k_c \\cdot d_{center}$$
+
+**Parameters:**
+- *Repulsion*: How strongly nodes push each other apart
+- *Edge Length*: Target distance between connected nodes
+- *Edge Tension*: How strongly edges pull nodes together
+- *Center Gravity*: Pull towards graph center
+- *Damping*: Velocity decay (higher = faster settling)
+- *Boundary*: Maximum distance from center`} />
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     {!collapsedSections.has('analysis') && (
                                                     <div className="ml-5 mt-2 space-y-3">
                                                         {/* Size Mapping */}
@@ -2257,27 +2411,9 @@ Groups densely connected nodes. Higher $Q$ = better separation.`} />
                                                                     </button>
                                                                 ))}
                                                             </div>
-                                                            {/* Size Contrast slider - only show when PageRank or In-degree is active */}
-                                                            {sizeMappingMode !== 'default' && (
-                                                                <div className="mt-2">
-                                                                    <input
-                                                                        type="range"
-                                                                        min="0"
-                                                                        max="1"
-                                                                        step="0.1"
-                                                                        value={sizeContrast}
-                                                                        onChange={(e) => setSizeContrast(parseFloat(e.target.value))}
-                                                                        className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                                                                    />
-                                                                    <div className="flex justify-between text-[9px] text-white/30 mt-1">
-                                                                        <span>Uniform</span>
-                                                                        <span>Contrast</span>
-                                                                    </div>
-                                                                </div>
-                                                            )}
                                                         </div>
 
-                                                        {/* Color Mapping (placeholder) */}
+                                                        {/* Color Mapping */}
                                                         <div>
                                                             <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
                                                             <div className="flex gap-1 mt-1">
@@ -2297,6 +2433,25 @@ Groups densely connected nodes. Higher $Q$ = better separation.`} />
                                                                 ))}
                                                             </div>
                                                         </div>
+
+                                                        {/* Size Contrast slider - only show when PageRank or In-degree is active */}
+                                                        {sizeMappingMode !== 'default' && (
+                                                            <div>
+                                                                <input
+                                                                    type="range"
+                                                                    min="0"
+                                                                    max="1"
+                                                                    step="0.1"
+                                                                    value={sizeContrast}
+                                                                    onChange={(e) => setSizeContrast(parseFloat(e.target.value))}
+                                                                    className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                                                />
+                                                                <div className="flex justify-between text-[9px] text-white/30 mt-1">
+                                                                    <span>Uniform</span>
+                                                                    <span>Contrast</span>
+                                                                </div>
+                                                            </div>
+                                                        )}
 
                                                     </div>
                                                     )}
