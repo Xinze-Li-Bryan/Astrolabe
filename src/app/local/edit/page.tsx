@@ -246,8 +246,8 @@ function LocalEditorContent() {
     // Analysis panel state
     const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree' | 'depth' | 'bottleneck' | 'reachability'>('default')
     const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
-    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'community' | 'layer' | 'spectral'>('kind')
-    const [layoutClusterMode, setLayoutClusterMode] = useState<'none' | 'community' | 'layer' | 'spectral'>('none')
+    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'namespace' | 'community' | 'layer' | 'spectral'>('kind')
+    const [layoutClusterMode, setLayoutClusterMode] = useState<'none' | 'namespace' | 'community' | 'layer' | 'spectral'>('none')
     const [analysisData, setAnalysisData] = useState<{
         pagerank?: Record<string, number>
         indegree?: Record<string, number>
@@ -291,28 +291,6 @@ function LocalEditorContent() {
         '#06b6d4', // cyan
     ], [])
 
-    // Convert communities/clusters to Map for ForceLayout
-    // Uses layoutClusterMode (independent from colorMappingMode)
-    const nodeCommunities = useMemo(() => {
-        if (layoutClusterMode === 'spectral') {
-            return analysisData.spectralClusters
-                ? new Map(Object.entries(analysisData.spectralClusters))
-                : null
-        }
-        if (layoutClusterMode === 'layer') {
-            return analysisData.layers
-                ? new Map(Object.entries(analysisData.layers).map(([k, v]) => [k, v]))
-                : null
-        }
-        if (layoutClusterMode === 'community') {
-            return analysisData.communities
-                ? new Map(Object.entries(analysisData.communities))
-                : null
-        }
-        // For 'none' mode, no clustering
-        return null
-    }, [layoutClusterMode, analysisData.communities, analysisData.spectralClusters, analysisData.layers])
-
     // Graph data - source nodes from backend API
     // Use nodes and edges (including backend-calculated default styles), while keeping legacyNodes for search and other compatibility features
     const {
@@ -344,6 +322,50 @@ function LocalEditorContent() {
         }
         return colors
     }, [astrolabeNodes])
+
+    // Compute namespace assignments from node IDs (depth 1 = top-level namespace)
+    const namespaceData = useMemo(() => {
+        if (!astrolabeNodes || astrolabeNodes.length === 0) return null
+        const namespaceMap: Record<string, number> = {}
+        const namespaceToId = new Map<string, number>()
+        let nextId = 0
+        for (const node of astrolabeNodes) {
+            const parts = node.id.split('.')
+            const namespace = parts.length > 1 ? parts[0] : '_root'
+            if (!namespaceToId.has(namespace)) {
+                namespaceToId.set(namespace, nextId++)
+            }
+            namespaceMap[node.id] = namespaceToId.get(namespace)!
+        }
+        return { map: namespaceMap, count: namespaceToId.size, names: Array.from(namespaceToId.keys()) }
+    }, [astrolabeNodes])
+
+    // Convert communities/clusters to Map for ForceLayout
+    // Uses layoutClusterMode (independent from colorMappingMode)
+    const nodeCommunities = useMemo(() => {
+        if (layoutClusterMode === 'namespace') {
+            return namespaceData?.map
+                ? new Map(Object.entries(namespaceData.map))
+                : null
+        }
+        if (layoutClusterMode === 'spectral') {
+            return analysisData.spectralClusters
+                ? new Map(Object.entries(analysisData.spectralClusters))
+                : null
+        }
+        if (layoutClusterMode === 'layer') {
+            return analysisData.layers
+                ? new Map(Object.entries(analysisData.layers).map(([k, v]) => [k, v]))
+                : null
+        }
+        if (layoutClusterMode === 'community') {
+            return analysisData.communities
+                ? new Map(Object.entries(analysisData.communities))
+                : null
+        }
+        // For 'none' mode, no clustering
+        return null
+    }, [layoutClusterMode, namespaceData, analysisData.communities, analysisData.spectralClusters, analysisData.layers])
 
     // Namespace depth preview for clustering UI
     const namespaceDepthPreview = useMemo(() => {
@@ -1104,6 +1126,12 @@ function LocalEditorContent() {
 
         // Calculate color based on color mapping mode
         const getNodeColor = (nodeId: string, defaultColor: string): string => {
+            if (colorMappingMode === 'namespace' && namespaceData?.map) {
+                const nsId = namespaceData.map[nodeId]
+                if (nsId !== undefined) {
+                    return COMMUNITY_COLORS[nsId % COMMUNITY_COLORS.length]
+                }
+            }
             if (colorMappingMode === 'community' && analysisData.communities) {
                 const communityId = analysisData.communities[nodeId]
                 if (communityId !== undefined) {
@@ -1154,7 +1182,7 @@ function LocalEditorContent() {
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, COMMUNITY_COLORS])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, COMMUNITY_COLORS, namespaceData])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -2920,6 +2948,7 @@ $$F_c = k_c \\cdot d_{center}$$
                                                             <div className="flex flex-wrap gap-1 mt-1">
                                                                 {([
                                                                     { mode: 'kind' as const, label: 'Kind', data: true, tooltip: 'Color by node type (theorem, lemma, def, etc.)' },
+                                                                    { mode: 'namespace' as const, label: 'Namespace', data: namespaceData, tooltip: 'Color by top-level namespace (e.g., Mathlib, Init)' },
                                                                     { mode: 'community' as const, label: 'Community', data: analysisData.communities, tooltip: 'Color by Louvain community detection' },
                                                                     { mode: 'layer' as const, label: 'Layer', data: analysisData.layers, tooltip: 'Color by topological layer (dependency depth)' },
                                                                     { mode: 'spectral' as const, label: 'Spectral', data: analysisData.spectralClusters, tooltip: 'Color by spectral clustering (graph Laplacian)' },
