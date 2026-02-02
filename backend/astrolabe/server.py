@@ -2769,7 +2769,9 @@ async def get_topology_analysis(
     response_data["bettiNumbers"] = betti
 
     # Persistent homology (if gudhi available and graph not too large)
-    if include_persistent_homology and G.number_of_nodes() <= 2000:
+    # Note: For graphs with >4000 nodes, computation can be very slow
+    max_nodes_for_ph = 4000
+    if include_persistent_homology and G.number_of_nodes() <= max_nodes_for_ph:
         ph = compute_persistent_homology(G, filtration=filtration)
         if "error" not in ph and "warning" not in ph:
             response_data["persistentHomology"] = {
@@ -2782,7 +2784,7 @@ async def get_topology_analysis(
         else:
             response_data["persistentHomology"] = ph
     elif include_persistent_homology:
-        response_data["persistentHomology"] = {"note": "Skipped for large graph (>2000 nodes)"}
+        response_data["persistentHomology"] = {"note": f"Skipped: graph too large ({G.number_of_nodes()} > {max_nodes_for_ph} nodes)"}
 
     return {
         "status": "ok",
@@ -2895,8 +2897,12 @@ async def get_metric_correlations(
     metrics["betweenness"] = bc_result.values
 
     # Clustering
-    clustering = compute_clustering_coefficients(G)
-    metrics["clustering"] = clustering
+    try:
+        clustering_result = compute_clustering_coefficients(G)
+        metrics["clustering"] = clustering_result.local
+    except Exception as e:
+        import logging
+        logging.warning(f"Clustering failed in correlations: {e}")
 
     # In-degree
     metrics["indegree"] = {n: G.in_degree(n) for n in G.nodes()}

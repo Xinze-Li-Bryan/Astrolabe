@@ -191,13 +191,13 @@ def compute_persistent_homology(
                 diagrams[dim].append({
                     "birth": float(birth),
                     "death": float(death) if death != float('inf') else None,
-                    "persistence": float(death - birth) if death != float('inf') else float('inf'),
+                    "persistence": float(death - birth) if death != float('inf') else None,  # None for infinite persistence (JSON-safe)
                 })
 
-        # Sort by persistence (longest-lived features first)
+        # Sort by persistence (longest-lived features first, None=infinite at top)
         for dim in diagrams:
             diagrams[dim].sort(
-                key=lambda x: x["persistence"] if x["persistence"] != float('inf') else 1e10,
+                key=lambda x: 1e10 if x["persistence"] is None else x["persistence"],
                 reverse=True
             )
 
@@ -221,7 +221,7 @@ def compute_persistent_homology(
                 "total_features": sum(len(d) for d in diagrams.values()),
                 "long_lived_features": sum(
                     1 for d in diagrams.values()
-                    for p in d if p["persistence"] > 0.5 or p["death"] is None
+                    for p in d if p["persistence"] is None or p["persistence"] > 0.5
                 ),
             },
             "interpretation": (

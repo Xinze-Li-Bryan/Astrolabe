@@ -152,6 +152,7 @@ function LocalEditorContent() {
     // Physics settings for 3D force graph
     const [physics, setPhysics] = useState<PhysicsParams>({ ...DEFAULT_PHYSICS })
     const [expandedInfoTips, setExpandedInfoTips] = useState<Set<string>>(new Set())
+    const [activeStatFormula, setActiveStatFormula] = useState<string | null>(null)
 
     // Lens picker (Cmd+K)
     const { isOpen: isLensPickerOpen, open: openLensPicker, close: closeLensPicker } = useLensPickerShortcut()
@@ -336,6 +337,7 @@ function LocalEditorContent() {
         dominantMotif?: Record<string, string>
         // P2: Visualization data
         persistenceDiagrams?: Record<string, Array<{birth: number, death: number | null, persistence: number}>>
+        persistenceStatus?: string  // Error or note from topology endpoint
         mapperGraph?: { nodes: Array<{id: number, size: number, filter_mean: number}>, edges: Array<{source: number, target: number}> }
         correlationMatrix?: { metrics: string[], matrix: number[][] }
     }>({})
@@ -1642,7 +1644,9 @@ function LocalEditorContent() {
             } : undefined
 
             // P2: Persistence diagrams
-            const persistenceDiagrams = topologyData?.data?.persistentHomology?.diagrams
+            const persistentHomology = topologyData?.data?.persistentHomology
+            const persistenceDiagrams = persistentHomology?.diagrams
+            const persistenceStatus = persistentHomology?.error || persistentHomology?.warning || persistentHomology?.note
 
             // P2: Correlation matrix
             const correlationMatrix = correlationsData?.data ? {
@@ -1693,6 +1697,7 @@ function LocalEditorContent() {
                 dominantMotif: motifParticipationData?.data?.dominantMotif,
                 // P2: Visualization data
                 persistenceDiagrams: persistenceDiagrams,
+                persistenceStatus: persistenceStatus,
                 mapperGraph: mapperGraph,
                 correlationMatrix: correlationMatrix,
             })
@@ -3019,268 +3024,34 @@ function LocalEditorContent() {
                                                             >
                                                                 <h2 className="text-lg text-white font-medium mb-3">Network Analysis</h2>
                                                                 <p className="text-sm text-white/60 mb-4">
-                                                                    Analyze the dependency graph structure using graph theory metrics.
-                                                                    Use <strong className="text-white/80">Size Mapping</strong> to visualize node importance,
-                                                                    and <strong className="text-white/80">Color Mapping</strong> to highlight community structure.
+                                                                    Analyze the dependency graph using graph theory and topological methods.
                                                                 </p>
-                                                                <div className="space-y-2">
-                                                                    {/* Graph Density */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Graph Density</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$D = \\frac{|E|}{|V| \\cdot (|V| - 1)}$$
 
-where $|E|$ = number of edges, $|V|$ = number of nodes.
+                                                                <div className="space-y-4 text-sm">
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-2">🔵 Size Mapping</div>
+                                                                        <div className="text-white/60">Map node importance metrics to visual size. Options include PageRank, betweenness centrality, dependency depth, Katz centrality, HITS scores, and more. Click the ⓘ next to Size Mapping for detailed formulas.</div>
+                                                                    </div>
 
-Ratio of actual edges to maximum possible edges. Higher = more interconnected.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* PageRank */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">PageRank</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$PR(u) = \\frac{1-d}{N} + d \\sum_{v \\in B_u} \\frac{PR(v)}{L(v)}$$
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-2">🎨 Color Mapping</div>
+                                                                        <div className="text-white/60">Color nodes by community structure, type, or geometric properties. Options include Louvain communities, spectral clustering, Ricci curvature, motif patterns, and more. Click the ⓘ next to Color Mapping for details.</div>
+                                                                    </div>
 
-- $PR(u)$ = PageRank of node $u$
-- $d = 0.85$ = damping factor
-- $N$ = total number of nodes
-- $B_u$ = set of nodes linking to $u$
-- $L(v)$ = outbound links from $v$
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-2">📊 Layout Clustering</div>
+                                                                        <div className="text-white/60">Group related nodes spatially using community detection, namespace hierarchy, spectral embedding, curvature grouping, or motif patterns.</div>
+                                                                    </div>
 
-A node is important if referenced by other important nodes.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* In-degree */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">In-degree Centrality</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$\\deg^{-}(v) = |\\{u : (u,v) \\in E\\}|$$
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-2">🔬 Advanced Analysis</div>
+                                                                        <div className="text-white/60">Persistence diagrams (topological features), Mapper graphs (shape skeleton), and metric correlation heatmaps are available below in this panel.</div>
+                                                                    </div>
 
-Count of incoming edges. High in-degree = widely used/depended upon.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Betweenness Centrality */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Betweenness Centrality</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$C_B(v) = \\sum_{s \\neq v \\neq t} \\frac{\\sigma_{st}(v)}{\\sigma_{st}}$$
-
-- $\\sigma_{st}$ = number of shortest paths from $s$ to $t$
-- $\\sigma_{st}(v)$ = paths passing through $v$
-
-High betweenness = "bridge" connecting different parts of the graph.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Community Detection */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Community Detection (Louvain)</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$Q = \\frac{1}{2m} \\sum_{ij} \\left[ A_{ij} - \\frac{k_i k_j}{2m} \\right] \\delta(c_i, c_j)$$
-
-- $Q$ = modularity $\\in [0,1]$
-- $m$ = total edges
-- $A_{ij}$ = adjacency matrix
-- $k_i, k_j$ = node degrees
-- $\\delta(c_i, c_j)$ = 1 if same community
-
-Groups densely connected nodes. Higher $Q$ = better separation.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Dependency Depth */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Dependency Depth</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$\\text{depth}(v) = \\max_{u \\in \\text{ancestors}(v)} d(u, v)$$
-
-Longest path from any root (axiom/definition) to the node.
-
-- **Depth 0**: Axioms, definitions (no dependencies)
-- **Higher depth**: More abstract theorems
-
-Useful for understanding proof "height" in the abstraction hierarchy.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Bottleneck Score */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Bottleneck Score</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$\\text{bottleneck}(v) = \\frac{|\\text{descendants}(v)|}{|\\text{ancestors}(v)|}$$
-
-Ratio of nodes depending on $v$ to nodes $v$ depends on.
-
-- **High score**: Foundational lemma (many depend on it, it depends on few)
-- **Score = 0**: Terminal theorem (no dependents)
-
-Identifies key "building blocks" in the proof structure.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Reachability */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Reachability Count</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$\\text{reach}(v) = |\\{u : u \\text{ is reachable from } v\\}|$$
-
-Number of nodes transitively depending on this node.
-
-- **High reachability**: Breaking this would affect many theorems
-- **Low reachability**: Leaf or specialized result
-
-Impact analysis: "How many results depend on this lemma?"`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Spectral Clustering */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Spectral Clustering</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`Uses graph Laplacian eigenvectors:
-$$L = D - A$$
-
-The **Fiedler vector** (2nd smallest eigenvalue) partitions the graph.
-
-May reveal structure that Louvain misses, especially for:
-- Sparse connections between dense clusters
-- Hierarchical module boundaries`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Clustering Coefficient */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Clustering Coefficient</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`$$C(v) = \\frac{2 \\cdot |\\{e_{jk}\\}|}{k_v(k_v - 1)}$$
-
-- $k_v$ = degree of node $v$
-- $e_{jk}$ = edges between neighbors of $v$
-
-Measures how much a node's neighbors are connected to each other.
-
-- **High clustering**: Node is in a tightly-knit group
-- **Low clustering**: Node connects disparate parts
-
-*Size Mapping*: Larger nodes = more locally connected.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Kind (Color) */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Kind (Color)</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`Colors nodes by Lean declaration type:
-
-- 🟣 **theorem**: Proven propositions
-- 🔵 **lemma**: Helper propositions
-- 🟢 **def**: Definitions
-- 🟡 **axiom**: Axioms/assumptions
-- 🟠 **instance**: Type class instances
-- ⚪ **other**: Other declaration types
-
-Useful for understanding the composition of a proof.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Namespace (Color) */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Namespace (Color)</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`Colors nodes by their top-level Lean namespace.
-
-Examples: \`Mathlib.Algebra\`, \`Init.Core\`, \`Std.Data\`
-
-Each namespace gets a distinct color. Useful for:
-- Identifying which modules a proof depends on
-- Understanding cross-module dependencies
-- Finding code organization patterns`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Layer (Color) */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Layer (Color)</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`Colors nodes by topological layer (dependency depth).
-
-Light blue → Dark blue gradient:
-- **Light**: Low depth (axioms, basic definitions)
-- **Dark**: High depth (complex theorems)
-
-Same as Depth in Size Mapping, but visualized as color gradient.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Curvature (Color) */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Curvature (Color)</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`Forman-Ricci curvature from differential geometry:
-$$F(e) = 4 - d(v_1) - d(v_2)$$
-
-Node curvature = average of incoming edge curvatures.
-
-- 🔴 **Negative** (red): Branching points, fundamental lemmas
-- ⚪ **Zero** (gray): Linear chains, no incoming edges
-- 🟢 **Positive** (green): Tightly clustered regions
-
-Identifies structural "shape" of the proof network.`} />
-                                                                        </div>
-                                                                    </details>
-                                                                    {/* Anomaly (Color) */}
-                                                                    <details className="group">
-                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
-                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
-                                                                            <span className="font-medium">Anomaly (Color)</span>
-                                                                        </summary>
-                                                                        <div className="mt-2 ml-6 pb-2">
-                                                                            <MarkdownRenderer content={`Highlights statistically unusual nodes using z-score:
-$$z = \\frac{x - \\mu}{\\sigma}$$
-
-- 🔴 **Red**: Anomaly ($|z| > 2$, ~5% of nodes)
-- ⚫ **Gray**: Normal
-
-Based on betweenness centrality outliers.
-
-Anomalies may indicate:
-- Critical bridge nodes
-- Unusual dependency patterns
-- Potential refactoring candidates`} />
-                                                                        </div>
-                                                                    </details>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-2">🌉 Edge Features</div>
+                                                                        <div className="text-white/60">Show Bridges highlights critical edges. Highlight Path to Selected shows the dependency chain to a selected node.</div>
+                                                                    </div>
                                                                 </div>
                                                                 {/* Graph Statistics */}
                                                                 {(analysisData.density !== undefined || analysisData.vonNeumannEntropy !== undefined) && (
@@ -3288,57 +3059,102 @@ Anomalies may indicate:
                                                                         <h3 className="text-sm font-medium text-white/80 mb-2">Graph Statistics</h3>
                                                                         <div className="grid grid-cols-2 gap-2 text-sm">
                                                                             {analysisData.nodeCount !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'nodes' ? null : 'nodes')}>
                                                                                     <div className="text-white/40 text-xs">Nodes</div>
                                                                                     <div className="text-white font-medium">{analysisData.nodeCount.toLocaleString()}</div>
+                                                                                    {activeStatFormula === 'nodes' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$|V|$ = number of vertices (declarations)`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.edgeCount !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'edges' ? null : 'edges')}>
                                                                                     <div className="text-white/40 text-xs">Edges</div>
                                                                                     <div className="text-white font-medium">{analysisData.edgeCount.toLocaleString()}</div>
+                                                                                    {activeStatFormula === 'edges' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$|E|$ = number of edges (dependencies)`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.density !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'density' ? null : 'density')}>
                                                                                     <div className="text-white/40 text-xs">Density</div>
                                                                                     <div className="text-white font-medium">{(analysisData.density * 100).toFixed(4)}%</div>
+                                                                                    {activeStatFormula === 'density' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$$D = \\frac{|E|}{|V|(|V|-1)}$$`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.communityCount !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'communities' ? null : 'communities')}>
                                                                                     <div className="text-white/40 text-xs">Communities</div>
                                                                                     <div className="text-white font-medium">{analysisData.communityCount}</div>
+                                                                                    {activeStatFormula === 'communities' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[250px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`Louvain algorithm partitions graph into densely connected groups`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.modularity !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'modularity' ? null : 'modularity')}>
                                                                                     <div className="text-white/40 text-xs">Modularity Q</div>
                                                                                     <div className="text-white font-medium">{analysisData.modularity.toFixed(4)}</div>
+                                                                                    {activeStatFormula === 'modularity' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$$Q = \\frac{1}{2m}\\sum_{ij}\\left[A_{ij} - \\frac{k_ik_j}{2m}\\right]\\delta(c_i,c_j)$$`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.bridges && analysisData.bridges.length > 0 && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'bridges' ? null : 'bridges')}>
                                                                                     <div className="text-white/40 text-xs">Bridges</div>
                                                                                     <div className="text-white font-medium">{analysisData.bridges.length}</div>
+                                                                                    {activeStatFormula === 'bridges' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`Edges whose removal disconnects the graph (critical dependencies)`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.vonNeumannEntropy !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'vnEntropy' ? null : 'vnEntropy')}>
                                                                                     <div className="text-white/40 text-xs">Von Neumann Entropy</div>
                                                                                     <div className="text-white font-medium">{analysisData.vonNeumannEntropy.toFixed(4)}</div>
+                                                                                    {activeStatFormula === 'vnEntropy' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$$S = -\\text{tr}(\\rho \\log \\rho)$$ where $\\rho = L/\\text{tr}(L)$`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.degreeShannon !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'shannon' ? null : 'shannon')}>
                                                                                     <div className="text-white/40 text-xs">Degree Shannon</div>
                                                                                     <div className="text-white font-medium">{analysisData.degreeShannon.toFixed(4)}</div>
+                                                                                    {activeStatFormula === 'shannon' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[300px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$$H = -\\sum_k p_k \\log p_k$$ where $p_k$ = fraction of nodes with degree $k$`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.structureEntropy !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'structEntropy' ? null : 'structEntropy')}>
                                                                                     <div className="text-white/40 text-xs">Structure Entropy</div>
                                                                                     <div className="text-white font-medium">{analysisData.structureEntropy.toFixed(4)}</div>
+                                                                                    {activeStatFormula === 'structEntropy' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`Measures structural complexity via hierarchical community encoding`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                         </div>
@@ -3351,31 +3167,55 @@ Anomalies may indicate:
                                                                         {/* DAG metrics */}
                                                                         {analysisData.graphDepth !== undefined && (
                                                                             <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'depth' ? null : 'depth')}>
                                                                                     <div className="text-white/40 text-xs">Proof Depth</div>
                                                                                     <div className="text-white font-medium">{analysisData.graphDepth}</div>
+                                                                                    {activeStatFormula === 'depth' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`$$\\text{depth}(v) = \\max_{u \\in \\text{deps}(v)} \\text{depth}(u) + 1$$`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'layers' ? null : 'layers')}>
                                                                                     <div className="text-white/40 text-xs">Layers</div>
                                                                                     <div className="text-white font-medium">{analysisData.numLayers}</div>
+                                                                                    {activeStatFormula === 'layers' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[250px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`Number of topological layers = max depth + 1`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'sources' ? null : 'sources')}>
                                                                                     <div className="text-white/40 text-xs">Axioms/Defs</div>
                                                                                     <div className="text-white font-medium">{analysisData.sources?.length ?? 0}</div>
+                                                                                    {activeStatFormula === 'sources' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`Source nodes: $\\text{indeg}(v) = 0$ (no dependencies)`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
-                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'sinks' ? null : 'sinks')}>
                                                                                     <div className="text-white/40 text-xs">Terminals</div>
                                                                                     <div className="text-white font-medium">{analysisData.sinks?.length ?? 0}</div>
+                                                                                    {activeStatFormula === 'sinks' && (
+                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                            <MarkdownRenderer content={`Sink nodes: $\\text{outdeg}(v) = 0$ (not used by others)`} />
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             </div>
                                                                         )}
                                                                         {analysisData.criticalPath && analysisData.criticalPath.length > 0 && (
-                                                                            <div className="mb-3 bg-white/5 rounded px-3 py-2">
-                                                                                <div className="text-white/40 text-xs mb-1">Longest Chain ({analysisData.criticalPath.length} nodes)</div>
-                                                                                <div className="text-white/60 text-xs font-mono truncate">
-                                                                                    {analysisData.criticalPath.slice(0, 3).join(' → ')}
-                                                                                    {analysisData.criticalPath.length > 3 && ` → ... → ${analysisData.criticalPath[analysisData.criticalPath.length - 1]}`}
+                                                                            <div className="mb-3 bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'criticalPath' ? null : 'criticalPath')}>
+                                                                                <div className="text-white/40 text-xs">Longest Chain ({analysisData.criticalPath.length} nodes)</div>
+                                                                                <div className="text-white/60 text-xs font-mono overflow-x-auto whitespace-nowrap pb-1">
+                                                                                    {analysisData.criticalPath.join(' → ')}
                                                                                 </div>
+                                                                                {activeStatFormula === 'criticalPath' && (
+                                                                                    <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
+                                                                                        <MarkdownRenderer content={`Critical path: longest dependency chain through the DAG`} />
+                                                                                    </div>
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                         {/* Declaration Kinds */}
@@ -3410,166 +3250,185 @@ Anomalies may indicate:
 
                                                                 {/* P2: Advanced Visualizations */}
                                                                 <div className="mt-4 pt-4 border-t border-white/10">
-                                                                    <h3 className="text-sm font-medium text-white/80 mb-2">Advanced Analysis</h3>
-                                                                    <div className="space-y-2">
+                                                                    <h3 className="text-sm font-medium text-white/80 mb-3">Advanced Analysis</h3>
+                                                                    <div className="space-y-3">
                                                                         {/* Persistence Diagram */}
                                                                         <details className="group bg-white/5 rounded-lg">
-                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-2 text-xs flex items-center gap-2">
-                                                                                <ChevronDownIcon className="w-3 h-3 transition-transform group-open:rotate-180" />
+                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-3 text-sm flex items-center gap-2">
+                                                                                <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
                                                                                 Persistence Diagram
-                                                                                {!analysisData.persistenceDiagrams && <span className="text-white/30 ml-1">(loading...)</span>}
+                                                                                {!analysisData.persistenceDiagrams && <span className="text-white/30 ml-1 text-xs">{analysisLoading ? '(loading...)' : analysisData.persistenceStatus ? `(${analysisData.persistenceStatus})` : '(n/a)'}</span>}
                                                                             </summary>
-                                                                            {analysisData.persistenceDiagrams && (
-                                                                                <div className="p-3 pt-0">
-                                                                                    <div className="bg-black/30 rounded p-2 h-40 relative">
-                                                                                        {/* Simple scatter plot for birth/death */}
-                                                                                        <svg viewBox="0 0 100 100" className="w-full h-full">
-                                                                                            {/* Diagonal line (birth = death) */}
-                                                                                            <line x1="0" y1="100" x2="100" y2="0" stroke="#444" strokeWidth="0.5" />
-                                                                                            {/* Axis labels */}
-                                                                                            <text x="50" y="98" fontSize="6" fill="#888" textAnchor="middle">birth</text>
-                                                                                            <text x="2" y="50" fontSize="6" fill="#888" transform="rotate(-90 5 50)">death</text>
-                                                                                            {/* H0 points (dimension 0) */}
-                                                                                            {(analysisData.persistenceDiagrams['0'] || []).slice(0, 50).map((pt, i) => (
-                                                                                                <circle
-                                                                                                    key={`h0-${i}`}
-                                                                                                    cx={pt.birth * 100}
-                                                                                                    cy={100 - (pt.death !== null ? pt.death * 100 : 100)}
-                                                                                                    r="2"
-                                                                                                    fill="#3b82f6"
-                                                                                                    opacity="0.7"
-                                                                                                />
-                                                                                            ))}
-                                                                                            {/* H1 points (dimension 1) */}
-                                                                                            {(analysisData.persistenceDiagrams['1'] || []).slice(0, 50).map((pt, i) => (
-                                                                                                <circle
-                                                                                                    key={`h1-${i}`}
-                                                                                                    cx={pt.birth * 100}
-                                                                                                    cy={100 - (pt.death !== null ? pt.death * 100 : 100)}
-                                                                                                    r="2"
-                                                                                                    fill="#f97316"
-                                                                                                    opacity="0.7"
-                                                                                                />
-                                                                                            ))}
-                                                                                        </svg>
-                                                                                        <div className="absolute bottom-1 right-1 text-[8px] text-white/40">
-                                                                                            <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1" />H₀
-                                                                                            <span className="inline-block w-2 h-2 bg-orange-500 rounded-full ml-2 mr-1" />H₁
+                                                                            <div className="px-3 pb-3 border-t border-white/10">
+                                                                                {/* Formula explanation */}
+                                                                                <details className="mt-2 mb-3">
+                                                                                    <summary className="cursor-pointer text-xs text-white/50 hover:text-white/70">Show formula</summary>
+                                                                                    <div className="mt-2 text-xs text-white/60">
+                                                                                        <MarkdownRenderer content={`**Persistent Homology** tracks topological features across a filtration.
+
+Each point $(b, d)$ represents a feature:
+- **birth** $b$: when the feature appears
+- **death** $d$: when the feature disappears
+- **persistence** $= d - b$: feature lifetime
+
+$$H_0$$: connected components (🔵)
+$$H_1$$: cycles/loops (🟠)
+
+Points far from diagonal have high persistence = robust features.`} />
+                                                                                    </div>
+                                                                                </details>
+                                                                                {analysisData.persistenceDiagrams && (
+                                                                                    <>
+                                                                                        <div className="bg-black/30 rounded p-3 h-48 relative">
+                                                                                            <svg viewBox="0 0 100 100" className="w-full h-full">
+                                                                                                <line x1="0" y1="100" x2="100" y2="0" stroke="#444" strokeWidth="0.5" />
+                                                                                                <text x="50" y="98" fontSize="8" fill="#888" textAnchor="middle">birth</text>
+                                                                                                <text x="2" y="50" fontSize="8" fill="#888" transform="rotate(-90 5 50)">death</text>
+                                                                                                {(analysisData.persistenceDiagrams['0'] || []).slice(0, 50).map((pt, i) => (
+                                                                                                    <circle key={`h0-${i}`} cx={pt.birth * 100} cy={100 - (pt.death !== null ? pt.death * 100 : 100)} r="3" fill="#3b82f6" opacity="0.7" />
+                                                                                                ))}
+                                                                                                {(analysisData.persistenceDiagrams['1'] || []).slice(0, 50).map((pt, i) => (
+                                                                                                    <circle key={`h1-${i}`} cx={pt.birth * 100} cy={100 - (pt.death !== null ? pt.death * 100 : 100)} r="3" fill="#f97316" opacity="0.7" />
+                                                                                                ))}
+                                                                                            </svg>
+                                                                                            <div className="absolute bottom-2 right-2 text-xs text-white/50 flex items-center gap-3">
+                                                                                                <span><span className="inline-block w-3 h-3 bg-blue-500 rounded-full mr-1" />H₀</span>
+                                                                                                <span><span className="inline-block w-3 h-3 bg-orange-500 rounded-full mr-1" />H₁</span>
+                                                                                            </div>
                                                                                         </div>
-                                                                                    </div>
-                                                                                    <div className="text-[10px] text-white/40 mt-1">
-                                                                                        Points far from diagonal = long-lived features
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
+                                                                                        <div className="text-xs text-white/50 mt-2">
+                                                                                            Points far from diagonal = long-lived topological features
+                                                                                        </div>
+                                                                                    </>
+                                                                                )}
+                                                                            </div>
                                                                         </details>
 
                                                                         {/* Mapper Graph */}
                                                                         <details className="group bg-white/5 rounded-lg">
-                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-2 text-xs flex items-center gap-2">
-                                                                                <ChevronDownIcon className="w-3 h-3 transition-transform group-open:rotate-180" />
+                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-3 text-sm flex items-center gap-2">
+                                                                                <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
                                                                                 Mapper Graph
-                                                                                {!analysisData.mapperGraph && <span className="text-white/30 ml-1">(loading...)</span>}
+                                                                                {!analysisData.mapperGraph && <span className="text-white/30 ml-1 text-xs">{analysisLoading ? '(loading...)' : '(n/a)'}</span>}
                                                                             </summary>
-                                                                            {analysisData.mapperGraph && (
-                                                                                <div className="p-3 pt-0">
-                                                                                    <div className="bg-black/30 rounded p-2 h-40 relative">
-                                                                                        <svg viewBox="0 0 100 100" className="w-full h-full">
-                                                                                            {/* Simple force-directed-ish layout based on id */}
-                                                                                            {analysisData.mapperGraph.edges.map((e, i) => {
-                                                                                                const nodes = analysisData.mapperGraph!.nodes
-                                                                                                const s = nodes.find(n => n.id === e.source)
-                                                                                                const t = nodes.find(n => n.id === e.target)
-                                                                                                if (!s || !t) return null
-                                                                                                // Position by filter_mean (x) and id (y with jitter)
-                                                                                                const sx = s.filter_mean * 80 + 10
-                                                                                                const sy = 20 + (s.id % 6) * 12
-                                                                                                const tx = t.filter_mean * 80 + 10
-                                                                                                const ty = 20 + (t.id % 6) * 12
-                                                                                                return (
-                                                                                                    <line key={`edge-${i}`} x1={sx} y1={sy} x2={tx} y2={ty} stroke="#666" strokeWidth="0.5" />
-                                                                                                )
-                                                                                            })}
-                                                                                            {analysisData.mapperGraph.nodes.map((n) => {
-                                                                                                const x = n.filter_mean * 80 + 10
-                                                                                                const y = 20 + (n.id % 6) * 12
-                                                                                                const r = Math.max(2, Math.min(8, Math.sqrt(n.size)))
-                                                                                                return (
-                                                                                                    <circle
-                                                                                                        key={`node-${n.id}`}
-                                                                                                        cx={x}
-                                                                                                        cy={y}
-                                                                                                        r={r}
-                                                                                                        fill="#22c55e"
-                                                                                                        opacity="0.8"
-                                                                                                    >
-                                                                                                        <title>Cluster {n.id}: {n.size} nodes</title>
-                                                                                                    </circle>
-                                                                                                )
-                                                                                            })}
-                                                                                        </svg>
+                                                                            <div className="px-3 pb-3 border-t border-white/10">
+                                                                                {/* Formula explanation */}
+                                                                                <details className="mt-2 mb-3">
+                                                                                    <summary className="cursor-pointer text-xs text-white/50 hover:text-white/70">Show formula</summary>
+                                                                                    <div className="mt-2 text-xs text-white/60">
+                                                                                        <MarkdownRenderer content={`**Mapper Algorithm** creates a simplified topological skeleton:
+
+1. Apply filter function $f: G \\to \\mathbb{R}$ (e.g., degree)
+2. Cover range with overlapping intervals $U_i$
+3. Cluster nodes in each $f^{-1}(U_i)$
+4. Connect clusters sharing nodes
+
+$$\\text{Mapper}(G, f) = \\text{NerveComplex}(\\{C_{i,k}\\})$$
+
+Node size = cluster size. Edges = shared members.`} />
                                                                                     </div>
-                                                                                    <div className="text-[10px] text-white/40 mt-1">
-                                                                                        {analysisData.mapperGraph.nodes.length} clusters, {analysisData.mapperGraph.edges.length} connections
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
+                                                                                </details>
+                                                                                {analysisData.mapperGraph && (
+                                                                                    <>
+                                                                                        <div className="bg-black/30 rounded p-3 h-48 relative">
+                                                                                            <svg viewBox="0 0 100 100" className="w-full h-full">
+                                                                                                {analysisData.mapperGraph.edges.map((e, i) => {
+                                                                                                    const nodes = analysisData.mapperGraph!.nodes
+                                                                                                    const s = nodes.find(n => n.id === e.source)
+                                                                                                    const t = nodes.find(n => n.id === e.target)
+                                                                                                    if (!s || !t) return null
+                                                                                                    const sx = s.filter_mean * 80 + 10
+                                                                                                    const sy = 20 + (s.id % 6) * 12
+                                                                                                    const tx = t.filter_mean * 80 + 10
+                                                                                                    const ty = 20 + (t.id % 6) * 12
+                                                                                                    return <line key={`edge-${i}`} x1={sx} y1={sy} x2={tx} y2={ty} stroke="#666" strokeWidth="0.5" />
+                                                                                                })}
+                                                                                                {analysisData.mapperGraph.nodes.map((n) => {
+                                                                                                    const x = n.filter_mean * 80 + 10
+                                                                                                    const y = 20 + (n.id % 6) * 12
+                                                                                                    const r = Math.max(3, Math.min(10, Math.sqrt(n.size) * 1.5))
+                                                                                                    return (
+                                                                                                        <circle key={`node-${n.id}`} cx={x} cy={y} r={r} fill="#22c55e" opacity="0.8">
+                                                                                                            <title>Cluster {n.id}: {n.size} nodes</title>
+                                                                                                        </circle>
+                                                                                                    )
+                                                                                                })}
+                                                                                            </svg>
+                                                                                        </div>
+                                                                                        <div className="text-xs text-white/50 mt-2">
+                                                                                            {analysisData.mapperGraph.nodes.length} clusters, {analysisData.mapperGraph.edges.length} connections
+                                                                                        </div>
+                                                                                    </>
+                                                                                )}
+                                                                            </div>
                                                                         </details>
 
                                                                         {/* Correlation Heatmap */}
                                                                         <details className="group bg-white/5 rounded-lg">
-                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-2 text-xs flex items-center gap-2">
-                                                                                <ChevronDownIcon className="w-3 h-3 transition-transform group-open:rotate-180" />
+                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-3 text-sm flex items-center gap-2">
+                                                                                <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
                                                                                 Metric Correlations
-                                                                                {!analysisData.correlationMatrix && <span className="text-white/30 ml-1">(loading...)</span>}
+                                                                                {!analysisData.correlationMatrix && <span className="text-white/30 ml-1 text-xs">{analysisLoading ? '(loading...)' : '(n/a)'}</span>}
                                                                             </summary>
-                                                                            {analysisData.correlationMatrix && analysisData.correlationMatrix.metrics.length > 0 && (
-                                                                                <div className="p-3 pt-0">
-                                                                                    <div className="bg-black/30 rounded p-2 overflow-x-auto">
-                                                                                        <table className="text-[8px] text-white/60 w-full">
-                                                                                            <thead>
-                                                                                                <tr>
-                                                                                                    <th className="p-1"></th>
-                                                                                                    {analysisData.correlationMatrix.metrics.map(m => (
-                                                                                                        <th key={m} className="p-1 font-normal truncate max-w-[40px]" title={m}>
-                                                                                                            {m.slice(0, 4)}
-                                                                                                        </th>
-                                                                                                    ))}
-                                                                                                </tr>
-                                                                                            </thead>
-                                                                                            <tbody>
-                                                                                                {analysisData.correlationMatrix.matrix.map((row, i) => (
-                                                                                                    <tr key={i}>
-                                                                                                        <td className="p-1 font-normal truncate max-w-[40px]" title={analysisData.correlationMatrix!.metrics[i]}>
-                                                                                                            {analysisData.correlationMatrix!.metrics[i].slice(0, 4)}
-                                                                                                        </td>
-                                                                                                        {row.map((val, j) => {
-                                                                                                            // Color: negative = red, positive = green, zero = gray
-                                                                                                            const intensity = Math.abs(val)
-                                                                                                            const bg = val > 0.1 ? `rgba(34, 197, 94, ${intensity * 0.8})`
-                                                                                                                    : val < -0.1 ? `rgba(239, 68, 68, ${intensity * 0.8})`
-                                                                                                                    : 'transparent'
-                                                                                                            return (
-                                                                                                                <td
-                                                                                                                    key={j}
-                                                                                                                    className="p-1 text-center"
-                                                                                                                    style={{ backgroundColor: bg }}
-                                                                                                                    title={`${analysisData.correlationMatrix!.metrics[i]} vs ${analysisData.correlationMatrix!.metrics[j]}: ${val.toFixed(2)}`}
-                                                                                                                >
-                                                                                                                    {val.toFixed(1)}
-                                                                                                                </td>
-                                                                                                            )
-                                                                                                        })}
+                                                                            <div className="px-3 pb-3 border-t border-white/10">
+                                                                                {/* Formula explanation */}
+                                                                                <details className="mt-2 mb-3">
+                                                                                    <summary className="cursor-pointer text-xs text-white/50 hover:text-white/70">Show formula</summary>
+                                                                                    <div className="mt-2 text-xs text-white/60">
+                                                                                        <MarkdownRenderer content={`**Spearman Rank Correlation** measures monotonic relationships:
+
+$$\\rho = 1 - \\frac{6 \\sum d_i^2}{n(n^2-1)}$$
+
+where $d_i$ = difference in ranks for node $i$.
+
+- $\\rho = 1$: perfect positive (🟢)
+- $\\rho = -1$: perfect negative (🔴)
+- $\\rho = 0$: no correlation`} />
+                                                                                    </div>
+                                                                                </details>
+                                                                                {analysisData.correlationMatrix && analysisData.correlationMatrix.metrics.length > 0 && (
+                                                                                    <>
+                                                                                        <div className="bg-black/30 rounded p-3 overflow-x-auto">
+                                                                                            <table className="text-xs text-white/60 w-full">
+                                                                                                <thead>
+                                                                                                    <tr>
+                                                                                                        <th className="p-1"></th>
+                                                                                                        {analysisData.correlationMatrix.metrics.map(m => (
+                                                                                                            <th key={m} className="p-1 font-normal truncate max-w-[50px]" title={m}>
+                                                                                                                {m.slice(0, 5)}
+                                                                                                            </th>
+                                                                                                        ))}
                                                                                                     </tr>
-                                                                                                ))}
-                                                                                            </tbody>
-                                                                                        </table>
-                                                                                    </div>
-                                                                                    <div className="text-[10px] text-white/40 mt-1">
-                                                                                        🟢 positive, 🔴 negative correlation (Spearman)
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
+                                                                                                </thead>
+                                                                                                <tbody>
+                                                                                                    {analysisData.correlationMatrix.matrix.map((row, i) => (
+                                                                                                        <tr key={i}>
+                                                                                                            <td className="p-1 font-normal truncate max-w-[50px]" title={analysisData.correlationMatrix!.metrics[i]}>
+                                                                                                                {analysisData.correlationMatrix!.metrics[i].slice(0, 5)}
+                                                                                                            </td>
+                                                                                                            {row.map((val, j) => {
+                                                                                                                const intensity = Math.abs(val)
+                                                                                                                const bg = val > 0.1 ? `rgba(34, 197, 94, ${intensity * 0.8})`
+                                                                                                                        : val < -0.1 ? `rgba(239, 68, 68, ${intensity * 0.8})`
+                                                                                                                        : 'transparent'
+                                                                                                                return (
+                                                                                                                    <td key={j} className="p-1 text-center" style={{ backgroundColor: bg }}
+                                                                                                                        title={`${analysisData.correlationMatrix!.metrics[i]} vs ${analysisData.correlationMatrix!.metrics[j]}: ${val.toFixed(2)}`}>
+                                                                                                                        {val.toFixed(1)}
+                                                                                                                    </td>
+                                                                                                                )
+                                                                                                            })}
+                                                                                                        </tr>
+                                                                                                    ))}
+                                                                                                </tbody>
+                                                                                            </table>
+                                                                                        </div>
+                                                                                        <div className="text-xs text-white/50 mt-2">
+                                                                                            🟢 positive correlation, 🔴 negative correlation (Spearman ρ)
+                                                                                        </div>
+                                                                                    </>
+                                                                                )}
+                                                                            </div>
                                                                         </details>
                                                                     </div>
                                                                 </div>
@@ -3768,43 +3627,132 @@ $$F_c = k_c \\cdot d_{center}$$
                                                         >
                                                             <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                                                                 <h2 className="text-lg text-white font-medium mb-3">Color Mapping Options</h2>
-                                                                <div className="space-y-3 text-sm">
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Kind</div>
-                                                                        <div className="text-white/60">Color by Lean declaration type: theorem (purple), lemma (blue), def (green), axiom (yellow), instance (orange).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Namespace</div>
-                                                                        <div className="text-white/60">Color by top-level namespace (e.g., Mathlib.Algebra, Init.Core). Each namespace gets a distinct color.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Community</div>
-                                                                        <div className="text-white/60">Louvain algorithm groups densely connected nodes. Same color = same community.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Layer</div>
-                                                                        <div className="text-white/60">Light→dark blue gradient by dependency depth. Light = axioms/defs, Dark = complex theorems.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Spectral</div>
-                                                                        <div className="text-white/60">Graph Laplacian eigenvector clustering. May reveal structure Louvain misses.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Curvature</div>
-                                                                        <div className="text-white/60">Forman-Ricci curvature: 🔴 negative = branching points, ⚪ zero = linear chains, 🟢 positive = clustered regions.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Anomaly</div>
-                                                                        <div className="text-white/60">Highlights statistical outliers (z-score {">"} 2). 🔴 Red = anomaly, ⚫ Gray = normal.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Embedding</div>
-                                                                        <div className="text-white/60">Spectral embedding + k-means clustering. Groups structurally similar nodes.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Motif</div>
-                                                                        <div className="text-white/60">Dominant motif pattern: 🔵 chain, 🟢 fork, 🟠 join, 🟣 diamond, ⚫ none.</div>
-                                                                    </div>
+                                                                <p className="text-sm text-white/60 mb-4">Click each option to see the formula and details.</p>
+                                                                <div className="space-y-2 text-sm">
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Kind</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`Color by Lean declaration type:
+- 🟣 **theorem** - proven propositions
+- 🔵 **lemma** - helper theorems
+- 🟢 **def** - definitions
+- 🟡 **axiom** - foundational assumptions
+- 🟠 **instance** - typeclass instances`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Namespace</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`Color by top-level namespace (e.g., Mathlib.Algebra, Init.Core).
+
+Each unique namespace gets a distinct color from the palette.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Community</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Louvain community detection** groups densely connected nodes.
+
+$$Q = \\frac{1}{2m} \\sum_{ij} \\left[ A_{ij} - \\frac{k_i k_j}{2m} \\right] \\delta(c_i, c_j)$$
+
+Maximizes modularity $Q$ by iteratively merging communities. Same color = same community.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Layer</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Topological layer** based on dependency depth.
+
+$$\\text{depth}(v) = \\max_{u \\in \\text{deps}(v)} \\text{depth}(u) + 1$$
+
+Light blue = axioms/defs (depth 0), Dark blue = complex theorems (high depth).`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Spectral</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Spectral clustering** using graph Laplacian eigenvectors.
+
+$$L = D - A$$
+
+where $D$ is the degree matrix and $A$ is the adjacency matrix. Clusters using the $k$ smallest eigenvectors of $L$.
+
+May reveal structure that Louvain misses (Fiedler vector partitioning).`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Curvature</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Forman-Ricci curvature** measures local graph geometry.
+
+$$F(e) = 4 - \\deg(u) - \\deg(v) + 3 \\cdot |\\triangle(e)|$$
+
+- 🔴 Negative = branching points (high degree, few triangles)
+- ⚪ Zero = linear chains
+- 🟢 Positive = clustered regions (many triangles)`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Anomaly</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Z-score anomaly detection** highlights statistical outliers.
+
+$$z = \\frac{x - \\mu}{\\sigma}, \\quad \\text{anomaly if } |z| > 2$$
+
+- 🔴 Red = anomalous node (unusual metrics)
+- ⚫ Gray = normal node`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Embedding</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Spectral embedding + k-means clustering**.
+
+1. Compute graph Laplacian eigenvectors
+2. Embed nodes in $\\mathbb{R}^k$ space
+3. Apply k-means clustering
+
+Groups structurally similar nodes based on their position in the embedding space.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Motif</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Dominant motif pattern** for each node:
+- 🔵 **chain**: $A \\to B \\to C$ (sequential)
+- 🟢 **fork**: $A \\to B, A \\to C$ (one feeds many)
+- 🟠 **join**: $A \\to C, B \\to C$ (many feed one)
+- 🟣 **diamond**: $A \\to B \\to D, A \\to C \\to D$ (parallel paths)
+- ⚫ **none**: no dominant pattern`} />
+                                                                        </div>
+                                                                    </details>
                                                                 </div>
                                                                 <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
                                                             </div>
@@ -3818,51 +3766,147 @@ $$F_c = k_c \\cdot d_{center}$$
                                                         >
                                                             <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                                                                 <h2 className="text-lg text-white font-medium mb-3">Size Mapping Options</h2>
-                                                                <div className="space-y-3 text-sm">
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Default</div>
-                                                                        <div className="text-white/60">Uniform node size. All nodes same size.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">PageRank</div>
-                                                                        <div className="text-white/60">Node importance: larger = referenced by other important nodes. Like Google's original algorithm.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">In-deg</div>
-                                                                        <div className="text-white/60">Incoming edge count: larger = more nodes depend on it directly.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Between</div>
-                                                                        <div className="text-white/60">Betweenness centrality: larger = more shortest paths pass through this node (bridge/connector).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Depth</div>
-                                                                        <div className="text-white/60">Dependency depth: larger = further from axioms (more abstract theorems).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Bottleneck</div>
-                                                                        <div className="text-white/60">Dependents/dependencies ratio: larger = foundational lemma (many depend on it, it depends on few).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Reach</div>
-                                                                        <div className="text-white/60">Transitive dependents: larger = breaking this affects more theorems.</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Cluster</div>
-                                                                        <div className="text-white/60">Clustering coefficient: larger = neighbors are well-connected (tightly-knit group).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Katz</div>
-                                                                        <div className="text-white/60">Katz centrality: larger = more influence via all walks (better for DAGs than PageRank).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Hub</div>
-                                                                        <div className="text-white/60">HITS hub score: larger = points to many good authorities (comprehensive proofs).</div>
-                                                                    </div>
-                                                                    <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-1">Authority</div>
-                                                                        <div className="text-white/60">HITS authority score: larger = pointed to by many good hubs (fundamental theorems).</div>
-                                                                    </div>
+                                                                <p className="text-sm text-white/60 mb-4">Click each option to see the formula and details.</p>
+                                                                <div className="space-y-2 text-sm">
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Default</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`Uniform node size. All nodes rendered at the same size regardless of metrics.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">PageRank</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**PageRank** measures node importance recursively.
+
+$$PR(v) = \\frac{1-d}{N} + d \\sum_{u \\to v} \\frac{PR(u)}{\\text{outdeg}(u)}$$
+
+where $d = 0.85$ (damping factor). Larger = referenced by other important nodes.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">In-degree</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**In-degree**: count of incoming edges.
+
+$$\\text{indeg}(v) = |\\{u : (u,v) \\in E\\}|$$
+
+Larger = more nodes depend on it directly. Simple popularity measure.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Betweenness</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Betweenness centrality**: fraction of shortest paths through node.
+
+$$BC(v) = \\sum_{s \\neq v \\neq t} \\frac{\\sigma_{st}(v)}{\\sigma_{st}}$$
+
+Larger = bridge/connector node. Many shortest paths pass through it.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Depth</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Dependency depth**: longest path from axioms.
+
+$$\\text{depth}(v) = \\max_{u \\in \\text{deps}(v)} \\text{depth}(u) + 1$$
+
+with $\\text{depth}(\\text{axiom}) = 0$. Larger = further from axioms.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Bottleneck</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Bottleneck score**: dependents vs dependencies ratio.
+
+$$\\text{bottleneck}(v) = \\frac{\\text{indeg}(v)}{\\text{outdeg}(v) + 1}$$
+
+Larger = foundational lemma. Many depend on it, it depends on few.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Reachability</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Transitive dependents**: all nodes that transitively depend on this.
+
+$$\\text{reach}(v) = |\\text{ancestors}(v)|$$
+
+Larger = breaking this affects more theorems. Impact measure.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Clustering</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Clustering coefficient**: neighbor connectivity.
+
+$$C(v) = \\frac{2 \\cdot |\\triangle(v)|}{\\deg(v) \\cdot (\\deg(v)-1)}$$
+
+Larger = neighbors are well-connected. Part of a tightly-knit group.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Katz</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**Katz centrality**: influence via all walks.
+
+$$x_i = \\alpha \\sum_j A_{ij} x_j + \\beta$$
+
+where $\\alpha < 1/\\lambda_{\\max}$. Better for DAGs than PageRank.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Hub</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**HITS hub score**: points to good authorities.
+
+$$\\text{hub}(v) = \\sum_{u \\in \\text{succ}(v)} \\text{auth}(u)$$
+
+Iterative power method. Larger = comprehensive proof using many fundamentals.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    <details className="bg-white/5 rounded-lg group">
+                                                                        <summary className="p-3 cursor-pointer list-none flex items-center justify-between hover:bg-white/10 rounded-lg transition-colors">
+                                                                            <span className="font-medium text-white">Authority</span>
+                                                                            <span className="text-white/40 text-xs group-open:rotate-180 transition-transform">▼</span>
+                                                                        </summary>
+                                                                        <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
+                                                                            <MarkdownRenderer content={`**HITS authority score**: pointed to by good hubs.
+
+$$\\text{auth}(v) = \\sum_{u \\in \\text{pred}(v)} \\text{hub}(u)$$
+
+Iterative power method. Larger = fundamental theorem used by many proofs.`} />
+                                                                        </div>
+                                                                    </details>
                                                                 </div>
                                                                 <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
                                                             </div>
