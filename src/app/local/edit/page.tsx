@@ -2488,7 +2488,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2496,7 +2496,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
@@ -2545,7 +2545,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2553,7 +2553,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
@@ -2602,7 +2602,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2610,7 +2610,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
@@ -2648,7 +2648,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2656,7 +2656,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
@@ -2695,7 +2695,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2703,7 +2703,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
@@ -2742,7 +2742,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2750,7 +2750,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
@@ -2789,7 +2789,7 @@ function LocalEditorContent() {
                                                                     <input
                                                                         type="range"
                                                                         min="0"
-                                                                        max="2.0"
+                                                                        max="4.0"
                                                                         step="0.1"
                                                                         value={physics.communityClusteringStrength ?? 0.3}
                                                                         onChange={(e) => {
@@ -2797,7 +2797,7 @@ function LocalEditorContent() {
                                                                             updatePhysicsUndoable({
                                                                                 ...physics,
                                                                                 communityClusteringStrength: intensity,
-                                                                                communitySeparation: intensity * 1.5
+                                                                                communitySeparation: intensity * 1.5 + 0.5
                                                                             })
                                                                         }}
                                                                         className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"

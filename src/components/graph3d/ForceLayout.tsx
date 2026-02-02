@@ -83,11 +83,11 @@ export const DEFAULT_PHYSICS: PhysicsParams = {
   adaptiveSpringScale: 0.5,
   // Community-aware layout defaults
   communityAwareLayout: true,  // Enabled by default for stronger clustering
-  communitySameMultiplier: 0.3,
-  communityCrossMultiplier: 3.5,
+  communitySameMultiplier: 0.2,  // Tighter same-cluster springs
+  communityCrossMultiplier: 5.0,  // Stronger cross-cluster repulsion
   // Community clustering (direct forces)
-  communityClusteringStrength: 1.0,  // Increased for stronger default clustering
-  communitySeparation: 1.5,  // Increased for better separation
+  communityClusteringStrength: 2.0,  // Max clustering strength
+  communitySeparation: 3.0,  // Strong separation between clusters
   // Boundary constraint
   boundaryRadius: 50,
   boundaryStrength: 2.0,
