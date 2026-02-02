@@ -496,7 +496,7 @@ function LocalEditorContent() {
 
     // Analysis panel state
     const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree' | 'depth' | 'bottleneck' | 'reachability' | 'betweenness' | 'clustering' | 'katz' | 'hub' | 'authority'>('default')
-    const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
+    const [sizeCurveControl, setSizeCurveControl] = useState({ x: 0.25, y: 0.75 })  // Bezier control point
     const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'namespace' | 'community' | 'layer' | 'spectral' | 'curvature' | 'anomaly' | 'embedding' | 'motif'>('kind')
     const [layoutClusterMode, setLayoutClusterMode] = useState<'none' | 'namespace' | 'community' | 'layer' | 'spectral' | 'embedding' | 'curvature' | 'anomaly' | 'motif'>('community')
     const [analysisData, setAnalysisData] = useState<{
@@ -1370,15 +1370,28 @@ function LocalEditorContent() {
         // Other lenses: show all nodes (lens system handles visibility via filtering/aggregation)
         const isCanvasMode = !activeLensId || activeLensId === 'canvas'
 
-        // Calculate size based on analysis mode
-        // Exponent controls contrast: lower = more contrast, higher = more uniform
-        // sizeContrast 0 → exponent 1.0 (uniform), sizeContrast 1 → exponent 0.2 (max contrast)
-        const sizeExponent = 1.0 - sizeContrast * 0.8
+        // Calculate size based on analysis mode using bezier curve
+        // sizeCurveControl defines the control point of a quadratic bezier from (0,0) to (1,1)
+        const evalSizeCurve = (x: number): number => {
+            // Quadratic bezier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+            // P0=(0,0), P1=control, P2=(1,1)
+            // Solve for t given x using Newton's method (few iterations enough)
+            let t = x
+            for (let i = 0; i < 5; i++) {
+                const bx = 2 * (1 - t) * t * sizeCurveControl.x + t * t
+                const dbx = 2 * (1 - 2 * t) * sizeCurveControl.x + 2 * t
+                if (Math.abs(dbx) < 0.001) break
+                t = t - (bx - x) / dbx
+                t = Math.max(0, Math.min(1, t))
+            }
+            // Now compute y at this t
+            return 2 * (1 - t) * t * sizeCurveControl.y + t * t
+        }
         const getNodeSize = (nodeId: string, metaSize?: number): number | undefined => {
-            // Helper to normalize and scale
+            // Helper to normalize and scale using bezier curve
             const normalizeAndScale = (value: number, min: number, max: number): number => {
                 const normalized = max > min ? (value - min) / (max - min) : 0.5
-                return 0.3 + Math.pow(normalized, sizeExponent) * 4.7
+                return 0.3 + evalSizeCurve(normalized) * 4.7
             }
 
             if (sizeMappingMode === 'pagerank' && analysisData.pagerank) {
@@ -1572,7 +1585,7 @@ function LocalEditorContent() {
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, analysisData.betweenness, analysisData.clustering, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, analysisData.curvature, analysisData.anomalies, analysisData.katz, analysisData.hub, analysisData.authority, analysisData.embeddingClusters, analysisData.dominantMotif, COMMUNITY_COLORS, namespaceData])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeCurveControl, analysisData.pagerank, analysisData.indegree, analysisData.betweenness, analysisData.clustering, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, analysisData.curvature, analysisData.anomalies, analysisData.katz, analysisData.hub, analysisData.authority, analysisData.embeddingClusters, analysisData.dominantMotif, COMMUNITY_COLORS, namespaceData])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
@@ -4133,21 +4146,74 @@ Iterative power method. Larger = fundamental theorem used by many proofs.`} />
                                                             </div>
                                                         </div>
 
-                                                        {/* Size Contrast slider - only show when Size Mapping is active */}
+                                                        {/* Size Curve Editor - only show when Size Mapping is active */}
                                                         {sizeMappingMode !== 'default' && (
-                                                            <div>
-                                                                <input
-                                                                    type="range"
-                                                                    min="0"
-                                                                    max="1"
-                                                                    step="0.1"
-                                                                    value={sizeContrast}
-                                                                    onChange={(e) => setSizeContrast(parseFloat(e.target.value))}
-                                                                    className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                                                                />
-                                                                <div className="flex justify-between text-[9px] text-white/30 mt-1">
-                                                                    <span>Uniform</span>
-                                                                    <span>Contrast</span>
+                                                            <div className="mt-3">
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <span className="text-[10px] text-white/50">Size Curve</span>
+                                                                    <span className="text-[10px] text-white/30">
+                                                                        {sizeCurveControl.y > sizeCurveControl.x + 0.1 ? '↑ Boost small values' :
+                                                                         sizeCurveControl.y < sizeCurveControl.x - 0.1 ? '↓ Boost large values' : '— Linear'}
+                                                                    </span>
+                                                                </div>
+                                                                <div
+                                                                    className="relative w-full bg-gradient-to-br from-white/5 to-transparent rounded-lg border border-white/10 select-none"
+                                                                    style={{ aspectRatio: '1 / 1' }}
+                                                                >
+                                                                    <svg viewBox="0 0 100 100" className="w-full h-full">
+                                                                        {/* Diagonal reference (linear) */}
+                                                                        <line x1="0" y1="100" x2="100" y2="0" stroke="#ffffff10" strokeWidth="1" strokeDasharray="4,4" />
+                                                                        {/* Control point guide lines */}
+                                                                        <line
+                                                                            x1="0" y1="100"
+                                                                            x2={sizeCurveControl.x * 100} y2={100 - sizeCurveControl.y * 100}
+                                                                            stroke="#3b82f650" strokeWidth="1"
+                                                                        />
+                                                                        <line
+                                                                            x1={sizeCurveControl.x * 100} y1={100 - sizeCurveControl.y * 100}
+                                                                            x2="100" y2="0"
+                                                                            stroke="#3b82f650" strokeWidth="1"
+                                                                        />
+                                                                        {/* Bezier curve */}
+                                                                        <path
+                                                                            d={`M 0,100 Q ${sizeCurveControl.x * 100},${100 - sizeCurveControl.y * 100} 100,0`}
+                                                                            fill="none"
+                                                                            stroke="#3b82f6"
+                                                                            strokeWidth="2.5"
+                                                                        />
+                                                                        {/* Start and end points */}
+                                                                        <circle cx="0" cy="100" r="4" fill="#3b82f6" />
+                                                                        <circle cx="100" cy="0" r="4" fill="#3b82f6" />
+                                                                    </svg>
+                                                                    {/* Draggable control point */}
+                                                                    <div
+                                                                        className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-white border-2 border-blue-500 cursor-grab active:cursor-grabbing shadow-lg hover:scale-110 transition-transform"
+                                                                        style={{
+                                                                            left: `${sizeCurveControl.x * 100}%`,
+                                                                            top: `${(1 - sizeCurveControl.y) * 100}%`,
+                                                                        }}
+                                                                        onMouseDown={(e) => {
+                                                                            e.stopPropagation()
+                                                                            const parent = e.currentTarget.parentElement!
+                                                                            const rect = parent.getBoundingClientRect()
+                                                                            const updateControl = (clientX: number, clientY: number) => {
+                                                                                const x = Math.max(0.05, Math.min(0.95, (clientX - rect.left) / rect.width))
+                                                                                const y = 1 - Math.max(0.05, Math.min(0.95, (clientY - rect.top) / rect.height))
+                                                                                setSizeCurveControl({ x, y })
+                                                                            }
+                                                                            const onMove = (ev: MouseEvent) => updateControl(ev.clientX, ev.clientY)
+                                                                            const onUp = () => {
+                                                                                window.removeEventListener('mousemove', onMove)
+                                                                                window.removeEventListener('mouseup', onUp)
+                                                                            }
+                                                                            window.addEventListener('mousemove', onMove)
+                                                                            window.addEventListener('mouseup', onUp)
+                                                                        }}
+                                                                    />
+                                                                    {/* Axis labels */}
+                                                                    <div className="absolute bottom-1 left-1 text-[9px] text-white/20">0</div>
+                                                                    <div className="absolute bottom-1 right-1 text-[9px] text-white/20">metric →</div>
+                                                                    <div className="absolute top-1 left-1 text-[9px] text-white/20">size ↑</div>
                                                                 </div>
                                                             </div>
                                                         )}
