@@ -154,6 +154,211 @@ function LocalEditorContent() {
     const [expandedInfoTips, setExpandedInfoTips] = useState<Set<string>>(new Set())
     const [activeStatFormula, setActiveStatFormula] = useState<string | null>(null)
 
+    // Formula explanations for statistics - displayed in centered modal
+    const statFormulaExplanations: Record<string, { title: string; content: string }> = {
+        // Graph Statistics
+        nodes: {
+            title: 'Nodes (Vertices)',
+            content: `**Formula:** $|V|$
+
+**Definition:** The total number of nodes (vertices) in the dependency graph.
+
+**Variables:**
+- $V$ — The set of all nodes in the graph
+- $|V|$ — The cardinality (count) of the node set
+
+**Interpretation:** Each node represents a Lean declaration (theorem, definition, lemma, etc.). More nodes indicate a larger codebase.`
+        },
+        edges: {
+            title: 'Edges (Dependencies)',
+            content: `**Formula:** $|E|$
+
+**Definition:** The total number of directed edges in the dependency graph.
+
+**Variables:**
+- $E$ — The set of all edges in the graph
+- $|E|$ — The cardinality (count) of the edge set
+
+**Interpretation:** Each edge represents a dependency relationship where one declaration uses another. More edges indicate more interconnected code.`
+        },
+        density: {
+            title: 'Graph Density',
+            content: `**Formula:** $$D = \\frac{|E|}{|V| \\cdot (|V| - 1)}$$
+
+**Definition:** The ratio of actual edges to the maximum possible edges in a directed graph.
+
+**Variables:**
+- $D$ — Density value (0 to 1)
+- $|E|$ — Number of edges
+- $|V|$ — Number of nodes
+- $|V| \\cdot (|V|-1)$ — Maximum possible edges in a directed graph
+
+**Interpretation:**
+- $D \\approx 0$ — Sparse graph (few dependencies)
+- $D \\approx 1$ — Dense graph (many dependencies)
+- Typical code graphs have very low density (< 1%)`
+        },
+        communities: {
+            title: 'Communities (Louvain)',
+            content: `**Algorithm:** Louvain Community Detection
+
+**Definition:** Number of densely connected groups found by the Louvain algorithm.
+
+**How it works:**
+1. Initially, each node is its own community
+2. Nodes are moved to neighboring communities if it increases modularity
+3. Communities are aggregated and the process repeats
+4. Stops when no move improves modularity
+
+**Interpretation:** Communities often correspond to functional modules or related features in the codebase.`
+        },
+        modularity: {
+            title: 'Modularity Q',
+            content: `**Formula:** $$Q = \\frac{1}{2m} \\sum_{ij} \\left[ A_{ij} - \\frac{k_i k_j}{2m} \\right] \\delta(c_i, c_j)$$
+
+**Definition:** Measures the strength of division into communities.
+
+**Variables:**
+- $Q$ — Modularity score (-0.5 to 1)
+- $m$ — Total number of edges ($|E|$)
+- $A_{ij}$ — Adjacency matrix entry (1 if edge exists, 0 otherwise)
+- $k_i, k_j$ — Degree of nodes $i$ and $j$
+- $\\frac{k_i k_j}{2m}$ — Expected edges under null model
+- $\\delta(c_i, c_j)$ — 1 if nodes $i,j$ are in same community, 0 otherwise
+
+**Interpretation:**
+- $Q > 0.3$ — Significant community structure
+- $Q > 0.7$ — Strong community structure
+- Higher Q means clearer separation between modules`
+        },
+        bridges: {
+            title: 'Bridge Edges',
+            content: `**Definition:** Edges whose removal would disconnect the graph (increase the number of connected components).
+
+**Algorithm:** Tarjan's bridge-finding algorithm using DFS.
+
+**Variables:**
+- Bridge edge $(u, v)$ — An edge where removing it disconnects $u$ from $v$
+
+**Interpretation:** Bridge edges represent critical dependencies. If a bridge edge is broken (e.g., by refactoring), parts of the codebase become unreachable from each other.`
+        },
+        vnEntropy: {
+            title: 'Von Neumann Entropy',
+            content: `**Formula:** $$S_{VN} = -\\text{tr}(\\rho \\log_2 \\rho) = -\\sum_i \\lambda_i \\log_2 \\lambda_i$$
+
+**Definition:** Quantum-inspired entropy measuring graph structural complexity.
+
+**Variables:**
+- $S_{VN}$ — Von Neumann entropy (≥ 0)
+- $\\rho$ — Density matrix: $\\rho = \\frac{L}{\\text{tr}(L)}$
+- $L$ — Normalized Laplacian matrix
+- $\\lambda_i$ — Eigenvalues of $\\rho$
+- $\\text{tr}$ — Matrix trace (sum of diagonal)
+
+**Interpretation:**
+- Low entropy — Simple, regular structure
+- High entropy — Complex, irregular structure
+- Useful for comparing structural complexity across graphs`
+        },
+        shannon: {
+            title: 'Degree Shannon Entropy',
+            content: `**Formula:** $$H = -\\sum_{k} p_k \\log_2 p_k$$
+
+**Definition:** Shannon entropy of the degree distribution.
+
+**Variables:**
+- $H$ — Shannon entropy (≥ 0)
+- $k$ — A specific degree value
+- $p_k$ — Fraction of nodes with degree $k$: $p_k = \\frac{n_k}{|V|}$
+- $n_k$ — Number of nodes with degree $k$
+
+**Interpretation:**
+- Low entropy — Homogeneous degrees (all nodes similar)
+- High entropy — Heterogeneous degrees (varied connectivity)
+- Scale-free networks typically have high degree entropy`
+        },
+        structEntropy: {
+            title: 'Structure Entropy',
+            content: `**Formula:** $$H^{\\mathcal{T}} = -\\sum_{i=1}^{n} \\frac{d_i}{2m} \\log_2 \\frac{V_i}{V_{\\pi(i)}}$$
+
+**Definition:** Measures structural complexity via hierarchical community encoding.
+
+**Variables:**
+- $H^{\\mathcal{T}}$ — Structure entropy
+- $d_i$ — Degree of node $i$
+- $m$ — Total number of edges
+- $V_i$ — Volume of node $i$'s community
+- $V_{\\pi(i)}$ — Volume of parent community in hierarchy
+- $\\pi(i)$ — Parent of node $i$ in encoding tree
+
+**Interpretation:** Lower structure entropy indicates more compressible/organized structure. Used to find optimal community hierarchies.`
+        },
+        // Lean Statistics
+        depth: {
+            title: 'Proof Depth (DAG Height)',
+            content: `**Formula:** $$\\text{depth}(v) = \\begin{cases} 0 & \\text{if } \\text{indeg}(v) = 0 \\\\ \\max_{u \\in \\text{deps}(v)} \\text{depth}(u) + 1 & \\text{otherwise} \\end{cases}$$
+
+**Definition:** The longest path from any source node to any sink node in the DAG.
+
+**Variables:**
+- $\\text{depth}(v)$ — Depth of node $v$
+- $\\text{indeg}(v)$ — In-degree (number of dependencies)
+- $\\text{deps}(v)$ — Set of nodes that $v$ depends on
+
+**Interpretation:** Proof depth indicates the maximum "layers" of abstraction. Deep proofs rely on long chains of lemmas.`
+        },
+        layers: {
+            title: 'Topological Layers',
+            content: `**Formula:** $$\\text{layers} = \\max_{v \\in V} \\text{depth}(v) + 1$$
+
+**Definition:** Number of distinct depth levels in the DAG.
+
+**Variables:**
+- $V$ — Set of all nodes
+- $\\text{depth}(v)$ — Depth of node $v$ (0-indexed)
+
+**Interpretation:** Layer 0 contains axioms/definitions with no dependencies. Each subsequent layer builds on previous layers.`
+        },
+        sources: {
+            title: 'Source Nodes (Axioms/Definitions)',
+            content: `**Formula:** $$\\text{Sources} = \\{ v \\in V : \\text{indeg}(v) = 0 \\}$$
+
+**Definition:** Nodes with no incoming edges (no dependencies).
+
+**Variables:**
+- $V$ — Set of all nodes
+- $\\text{indeg}(v)$ — In-degree of node $v$ (number of edges pointing to $v$)
+
+**Interpretation:** Source nodes are the "foundation" — axioms, primitive definitions, and external imports that don't depend on anything in the current scope.`
+        },
+        sinks: {
+            title: 'Sink Nodes (Terminals)',
+            content: `**Formula:** $$\\text{Sinks} = \\{ v \\in V : \\text{outdeg}(v) = 0 \\}$$
+
+**Definition:** Nodes with no outgoing edges (not used by other declarations).
+
+**Variables:**
+- $V$ — Set of all nodes
+- $\\text{outdeg}(v)$ — Out-degree of node $v$ (number of edges from $v$)
+
+**Interpretation:** Sink nodes are "endpoints" — final theorems, user-facing APIs, or unused code. They represent the ultimate goals or potentially dead code.`
+        },
+        criticalPath: {
+            title: 'Critical Path (Longest Chain)',
+            content: `**Algorithm:** Longest path in a DAG via dynamic programming.
+
+**Definition:** The longest dependency chain from any source to any sink.
+
+**How it works:**
+1. Topologically sort all nodes
+2. For each node, compute longest path ending at that node
+3. Track the predecessor to reconstruct the path
+4. Return the path with maximum length
+
+**Interpretation:** The critical path shows the deepest dependency chain. Theorems on this path form the "backbone" of the proof structure.`
+        }
+    }
+
     // Lens picker (Cmd+K)
     const { isOpen: isLensPickerOpen, open: openLensPicker, close: closeLensPicker } = useLensPickerShortcut()
 
@@ -3029,132 +3234,87 @@ function LocalEditorContent() {
 
                                                                 <div className="space-y-4 text-sm">
                                                                     <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-2">🔵 Size Mapping</div>
+                                                                        <div className="font-medium text-white mb-2 flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-blue-400 inline-block" /> Size Mapping</div>
                                                                         <div className="text-white/60">Map node importance metrics to visual size. Options include PageRank, betweenness centrality, dependency depth, Katz centrality, HITS scores, and more. Click the ⓘ next to Size Mapping for detailed formulas.</div>
                                                                     </div>
 
                                                                     <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-2">🎨 Color Mapping</div>
+                                                                        <div className="font-medium text-white mb-2 flex items-center gap-2"><span className="w-3 h-3 rounded-sm inline-block" style={{background: 'linear-gradient(135deg, #f43f5e, #8b5cf6, #3b82f6)'}} /> Color Mapping</div>
                                                                         <div className="text-white/60">Color nodes by community structure, type, or geometric properties. Options include Louvain communities, spectral clustering, Ricci curvature, motif patterns, and more. Click the ⓘ next to Color Mapping for details.</div>
                                                                     </div>
 
                                                                     <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-2">📊 Layout Clustering</div>
+                                                                        <div className="font-medium text-white mb-2 flex items-center gap-2"><span className="text-purple-400">⊞</span> Layout Clustering</div>
                                                                         <div className="text-white/60">Group related nodes spatially using community detection, namespace hierarchy, spectral embedding, curvature grouping, or motif patterns.</div>
                                                                     </div>
 
                                                                     <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-2">🔬 Advanced Analysis</div>
+                                                                        <div className="font-medium text-white mb-2 flex items-center gap-2"><span className="text-cyan-400">∑</span> Advanced Analysis</div>
                                                                         <div className="text-white/60">Persistence diagrams (topological features), Mapper graphs (shape skeleton), and metric correlation heatmaps are available below in this panel.</div>
                                                                     </div>
 
                                                                     <div className="bg-white/5 rounded-lg p-3">
-                                                                        <div className="font-medium text-white mb-2">🌉 Edge Features</div>
+                                                                        <div className="font-medium text-white mb-2 flex items-center gap-2"><span className="text-orange-400">⟷</span> Edge Features</div>
                                                                         <div className="text-white/60">Show Bridges highlights critical edges. Highlight Path to Selected shows the dependency chain to a selected node.</div>
                                                                     </div>
                                                                 </div>
                                                                 {/* Graph Statistics */}
                                                                 {(analysisData.density !== undefined || analysisData.vonNeumannEntropy !== undefined) && (
                                                                     <div className="mt-4 pt-4 border-t border-white/10">
-                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">Graph Statistics</h3>
+                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">Graph Statistics <span className="text-white/40 text-xs font-normal">(click for formula)</span></h3>
                                                                         <div className="grid grid-cols-2 gap-2 text-sm">
                                                                             {analysisData.nodeCount !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'nodes' ? null : 'nodes')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('nodes')}>
                                                                                     <div className="text-white/40 text-xs">Nodes</div>
                                                                                     <div className="text-white font-medium">{analysisData.nodeCount.toLocaleString()}</div>
-                                                                                    {activeStatFormula === 'nodes' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$|V|$ = number of vertices (declarations)`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.edgeCount !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'edges' ? null : 'edges')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('edges')}>
                                                                                     <div className="text-white/40 text-xs">Edges</div>
                                                                                     <div className="text-white font-medium">{analysisData.edgeCount.toLocaleString()}</div>
-                                                                                    {activeStatFormula === 'edges' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$|E|$ = number of edges (dependencies)`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.density !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'density' ? null : 'density')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('density')}>
                                                                                     <div className="text-white/40 text-xs">Density</div>
                                                                                     <div className="text-white font-medium">{(analysisData.density * 100).toFixed(4)}%</div>
-                                                                                    {activeStatFormula === 'density' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[200px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$$D = \\frac{|E|}{|V|(|V|-1)}$$`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.communityCount !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'communities' ? null : 'communities')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('communities')}>
                                                                                     <div className="text-white/40 text-xs">Communities</div>
                                                                                     <div className="text-white font-medium">{analysisData.communityCount}</div>
-                                                                                    {activeStatFormula === 'communities' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[250px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`Louvain algorithm partitions graph into densely connected groups`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.modularity !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'modularity' ? null : 'modularity')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('modularity')}>
                                                                                     <div className="text-white/40 text-xs">Modularity Q</div>
                                                                                     <div className="text-white font-medium">{analysisData.modularity.toFixed(4)}</div>
-                                                                                    {activeStatFormula === 'modularity' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$$Q = \\frac{1}{2m}\\sum_{ij}\\left[A_{ij} - \\frac{k_ik_j}{2m}\\right]\\delta(c_i,c_j)$$`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.bridges && analysisData.bridges.length > 0 && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'bridges' ? null : 'bridges')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('bridges')}>
                                                                                     <div className="text-white/40 text-xs">Bridges</div>
                                                                                     <div className="text-white font-medium">{analysisData.bridges.length}</div>
-                                                                                    {activeStatFormula === 'bridges' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`Edges whose removal disconnects the graph (critical dependencies)`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.vonNeumannEntropy !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'vnEntropy' ? null : 'vnEntropy')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('vnEntropy')}>
                                                                                     <div className="text-white/40 text-xs">Von Neumann Entropy</div>
                                                                                     <div className="text-white font-medium">{analysisData.vonNeumannEntropy.toFixed(4)}</div>
-                                                                                    {activeStatFormula === 'vnEntropy' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$$S = -\\text{tr}(\\rho \\log \\rho)$$ where $\\rho = L/\\text{tr}(L)$`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.degreeShannon !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'shannon' ? null : 'shannon')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('shannon')}>
                                                                                     <div className="text-white/40 text-xs">Degree Shannon</div>
                                                                                     <div className="text-white font-medium">{analysisData.degreeShannon.toFixed(4)}</div>
-                                                                                    {activeStatFormula === 'shannon' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[300px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$$H = -\\sum_k p_k \\log p_k$$ where $p_k$ = fraction of nodes with degree $k$`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {analysisData.structureEntropy !== undefined && (
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'structEntropy' ? null : 'structEntropy')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('structEntropy')}>
                                                                                     <div className="text-white/40 text-xs">Structure Entropy</div>
                                                                                     <div className="text-white font-medium">{analysisData.structureEntropy.toFixed(4)}</div>
-                                                                                    {activeStatFormula === 'structEntropy' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`Measures structural complexity via hierarchical community encoding`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                         </div>
@@ -3163,59 +3323,34 @@ function LocalEditorContent() {
                                                                 {/* Lean Statistics (DAG + Declaration Kinds) */}
                                                                 {(analysisData.graphDepth !== undefined || (analysisData.kindDistribution && Object.keys(analysisData.kindDistribution).length > 0)) && (
                                                                     <div className="mt-4 pt-4 border-t border-white/10">
-                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">Lean Statistics</h3>
+                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">Lean Statistics <span className="text-white/40 text-xs font-normal">(click for formula)</span></h3>
                                                                         {/* DAG metrics */}
                                                                         {analysisData.graphDepth !== undefined && (
                                                                             <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'depth' ? null : 'depth')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('depth')}>
                                                                                     <div className="text-white/40 text-xs">Proof Depth</div>
                                                                                     <div className="text-white font-medium">{analysisData.graphDepth}</div>
-                                                                                    {activeStatFormula === 'depth' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`$$\\text{depth}(v) = \\max_{u \\in \\text{deps}(v)} \\text{depth}(u) + 1$$`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'layers' ? null : 'layers')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('layers')}>
                                                                                     <div className="text-white/40 text-xs">Layers</div>
                                                                                     <div className="text-white font-medium">{analysisData.numLayers}</div>
-                                                                                    {activeStatFormula === 'layers' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[250px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`Number of topological layers = max depth + 1`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'sources' ? null : 'sources')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('sources')}>
                                                                                     <div className="text-white/40 text-xs">Axioms/Defs</div>
                                                                                     <div className="text-white font-medium">{analysisData.sources?.length ?? 0}</div>
-                                                                                    {activeStatFormula === 'sources' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`Source nodes: $\\text{indeg}(v) = 0$ (no dependencies)`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
-                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'sinks' ? null : 'sinks')}>
+                                                                                <div className="bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('sinks')}>
                                                                                     <div className="text-white/40 text-xs">Terminals</div>
                                                                                     <div className="text-white font-medium">{analysisData.sinks?.length ?? 0}</div>
-                                                                                    {activeStatFormula === 'sinks' && (
-                                                                                        <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                            <MarkdownRenderer content={`Sink nodes: $\\text{outdeg}(v) = 0$ (not used by others)`} />
-                                                                                        </div>
-                                                                                    )}
                                                                                 </div>
                                                                             </div>
                                                                         )}
                                                                         {analysisData.criticalPath && analysisData.criticalPath.length > 0 && (
-                                                                            <div className="mb-3 bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10 relative" onClick={() => setActiveStatFormula(activeStatFormula === 'criticalPath' ? null : 'criticalPath')}>
+                                                                            <div className="mb-3 bg-white/5 rounded px-3 py-2 cursor-pointer hover:bg-white/10" onClick={() => setActiveStatFormula('criticalPath')}>
                                                                                 <div className="text-white/40 text-xs">Longest Chain ({analysisData.criticalPath.length} nodes)</div>
                                                                                 <div className="text-white/60 text-xs font-mono overflow-x-auto whitespace-nowrap pb-1">
                                                                                     {analysisData.criticalPath.join(' → ')}
                                                                                 </div>
-                                                                                {activeStatFormula === 'criticalPath' && (
-                                                                                    <div className="absolute z-50 left-0 top-full mt-1 bg-gray-900 border border-white/20 rounded-lg shadow-xl p-3 min-w-[280px]" onClick={e => e.stopPropagation()}>
-                                                                                        <MarkdownRenderer content={`Critical path: longest dependency chain through the DAG`} />
-                                                                                    </div>
-                                                                                )}
                                                                             </div>
                                                                         )}
                                                                         {/* Declaration Kinds */}
@@ -3271,8 +3406,8 @@ Each point $(b, d)$ represents a feature:
 - **death** $d$: when the feature disappears
 - **persistence** $= d - b$: feature lifetime
 
-$$H_0$$: connected components (🔵)
-$$H_1$$: cycles/loops (🟠)
+$H_0$: connected components (dim-0, blue points)
+$H_1$: cycles/loops (dim-1, orange points)
 
 Points far from diagonal have high persistence = robust features.`} />
                                                                                     </div>
@@ -3381,8 +3516,8 @@ $$\\rho = 1 - \\frac{6 \\sum d_i^2}{n(n^2-1)}$$
 
 where $d_i$ = difference in ranks for node $i$.
 
-- $\\rho = 1$: perfect positive (🟢)
-- $\\rho = -1$: perfect negative (🔴)
+- $\\rho = 1$: perfect positive correlation
+- $\\rho = -1$: perfect negative correlation
 - $\\rho = 0$: no correlation`} />
                                                                                     </div>
                                                                                 </details>
@@ -3424,7 +3559,7 @@ where $d_i$ = difference in ranks for node $i$.
                                                                                             </table>
                                                                                         </div>
                                                                                         <div className="text-xs text-white/50 mt-2">
-                                                                                            🟢 positive correlation, 🔴 negative correlation (Spearman ρ)
+                                                                                            <span className="text-green-400">■</span> positive, <span className="text-red-400">■</span> negative (Spearman ρ)
                                                                                         </div>
                                                                                     </>
                                                                                 )}
@@ -3636,11 +3771,11 @@ $$F_c = k_c \\cdot d_{center}$$
                                                                         </summary>
                                                                         <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
                                                                             <MarkdownRenderer content={`Color by Lean declaration type:
-- 🟣 **theorem** - proven propositions
-- 🔵 **lemma** - helper theorems
-- 🟢 **def** - definitions
-- 🟡 **axiom** - foundational assumptions
-- 🟠 **instance** - typeclass instances`} />
+- **theorem** (purple) - proven propositions
+- **lemma** (blue) - helper theorems
+- **def** (green) - definitions
+- **axiom** (yellow) - foundational assumptions
+- **instance** (orange) - typeclass instances`} />
                                                                         </div>
                                                                     </details>
                                                                     <details className="bg-white/5 rounded-lg group">
@@ -3705,9 +3840,9 @@ May reveal structure that Louvain misses (Fiedler vector partitioning).`} />
 
 $$F(e) = 4 - \\deg(u) - \\deg(v) + 3 \\cdot |\\triangle(e)|$$
 
-- 🔴 Negative = branching points (high degree, few triangles)
-- ⚪ Zero = linear chains
-- 🟢 Positive = clustered regions (many triangles)`} />
+- Negative (red) = branching points (high degree, few triangles)
+- Zero (white) = linear chains
+- Positive (green) = clustered regions (many triangles)`} />
                                                                         </div>
                                                                     </details>
                                                                     <details className="bg-white/5 rounded-lg group">
@@ -3720,8 +3855,8 @@ $$F(e) = 4 - \\deg(u) - \\deg(v) + 3 \\cdot |\\triangle(e)|$$
 
 $$z = \\frac{x - \\mu}{\\sigma}, \\quad \\text{anomaly if } |z| > 2$$
 
-- 🔴 Red = anomalous node (unusual metrics)
-- ⚫ Gray = normal node`} />
+- Red = anomalous node (unusual metrics)
+- Gray = normal node`} />
                                                                         </div>
                                                                     </details>
                                                                     <details className="bg-white/5 rounded-lg group">
@@ -3746,11 +3881,11 @@ Groups structurally similar nodes based on their position in the embedding space
                                                                         </summary>
                                                                         <div className="px-3 pb-3 text-white/60 border-t border-white/10 pt-2">
                                                                             <MarkdownRenderer content={`**Dominant motif pattern** for each node:
-- 🔵 **chain**: $A \\to B \\to C$ (sequential)
-- 🟢 **fork**: $A \\to B, A \\to C$ (one feeds many)
-- 🟠 **join**: $A \\to C, B \\to C$ (many feed one)
-- 🟣 **diamond**: $A \\to B \\to D, A \\to C \\to D$ (parallel paths)
-- ⚫ **none**: no dominant pattern`} />
+- **chain** (blue): $A \\to B \\to C$ — sequential
+- **fork** (green): $A \\to B, A \\to C$ — one feeds many
+- **join** (orange): $A \\to C, B \\to C$ — many feed one
+- **diamond** (purple): $A \\to B \\to D, A \\to C \\to D$ — parallel paths
+- **none** (gray): no dominant pattern`} />
                                                                         </div>
                                                                     </details>
                                                                 </div>
@@ -5353,6 +5488,34 @@ Iterative power method. Larger = fundamental theorem used by many proofs.`} />
                 onClose={closeLensPicker}
                 nodeCount={canvasNodes.length}
             />
+
+            {/* Centered Formula Modal */}
+            {activeStatFormula && statFormulaExplanations[activeStatFormula] && (
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                    onClick={() => setActiveStatFormula(null)}
+                >
+                    <div
+                        className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-white">
+                                {statFormulaExplanations[activeStatFormula].title}
+                            </h3>
+                            <button
+                                onClick={() => setActiveStatFormula(null)}
+                                className="p-1 hover:bg-white/10 rounded transition-colors"
+                            >
+                                <XMarkIcon className="w-5 h-5 text-white/60" />
+                            </button>
+                        </div>
+                        <div className="text-base text-white/90 leading-relaxed">
+                            <MarkdownRenderer content={statFormulaExplanations[activeStatFormula].content} />
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* LSP Status Bar - bottom */}
             {lspStatus && (
