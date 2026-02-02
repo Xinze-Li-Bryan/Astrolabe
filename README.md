@@ -4,7 +4,7 @@ AI-native interface framework for formal mathematics. Together with [OpenMath](h
 
 *The future of mathematics is formal. The future of mathematics is open. The future of mathematics is for everyone.*
 
-[![Website](https://img.shields.io/badge/Website-astrolean.io-blue)](https://astrolean.io)
+[![Website](https://img.shields.io/badge/Website-astrolabe--lean.io-blue)](https://astrolabe-lean.io)
 [![Whitepaper](https://img.shields.io/badge/Whitepaper-Read-green)](https://github.com/Xinze-Li-Bryan/Astrolabe-Whitepaper)
 [![Join Us](https://img.shields.io/badge/Join%20Us-Apply-orange)](https://docs.google.com/forms/d/e/1FAIpQLSe5EfHnKQaxNcTpRCUsjVszAmJCcjH7xIOENo6H4ayeW5KgEQ/viewform)
 [![YouTube](https://img.shields.io/badge/YouTube-Tutorial%20Series-red)](https://www.youtube.com/@xinzzzzz-v7i)
