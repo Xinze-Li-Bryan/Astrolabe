@@ -145,6 +145,8 @@ function LocalEditorContent() {
     const storeSelectedNodeId = useSelectionStore(state => state.selectedNodeId)
     const storeSelectedEdgeId = useSelectionStore(state => state.selectedEdgeId)
     const [showLabels, setShowLabels] = useState(true) // Whether to show node labels
+    const [showBridges, setShowBridges] = useState(false) // Whether to highlight bridge edges
+    const [highlightedPath, setHighlightedPath] = useState<string[]>([]) // Critical path to selected node
     const getPositionsRef = useRef<(() => Map<string, [number, number, number]>) | null>(null) // Ref to get positions from ForceGraph3D
 
     // Physics settings for 3D force graph
@@ -287,13 +289,15 @@ function LocalEditorContent() {
     }, [])
 
     // Analysis panel state
-    const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree' | 'depth' | 'bottleneck' | 'reachability'>('default')
+    const [sizeMappingMode, setSizeMappingMode] = useState<'default' | 'pagerank' | 'indegree' | 'depth' | 'bottleneck' | 'reachability' | 'betweenness' | 'clustering' | 'katz' | 'hub' | 'authority'>('default')
     const [sizeContrast, setSizeContrast] = useState(0.5)  // 0 = uniform, 1 = max contrast
-    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'namespace' | 'community' | 'layer' | 'spectral'>('kind')
+    const [colorMappingMode, setColorMappingMode] = useState<'kind' | 'namespace' | 'community' | 'layer' | 'spectral' | 'curvature' | 'anomaly' | 'embedding' | 'motif'>('kind')
     const [layoutClusterMode, setLayoutClusterMode] = useState<'none' | 'namespace' | 'community' | 'layer' | 'spectral'>('none')
     const [analysisData, setAnalysisData] = useState<{
         pagerank?: Record<string, number>
         indegree?: Record<string, number>
+        betweenness?: Record<string, number>
+        clustering?: Record<string, number>
         communities?: Record<string, number>
         communityCount?: number
         modularity?: number
@@ -317,6 +321,23 @@ function LocalEditorContent() {
         vonNeumannEntropy?: number
         degreeShannon?: number
         structureEntropy?: number
+        // Lean-specific
+        kindDistribution?: Record<string, number>
+        // P1: Curvature and anomaly
+        curvature?: Record<string, number>
+        anomalies?: Record<string, boolean>
+        bridges?: Array<[string, string]>
+        // P2: Katz, HITS, embedding clusters, motifs
+        katz?: Record<string, number>
+        hub?: Record<string, number>
+        authority?: Record<string, number>
+        embeddingClusters?: Record<string, number>
+        numEmbeddingClusters?: number
+        dominantMotif?: Record<string, string>
+        // P2: Visualization data
+        persistenceDiagrams?: Record<string, Array<{birth: number, death: number | null, persistence: number}>>
+        mapperGraph?: { nodes: Array<{id: number, size: number, filter_mean: number}>, edges: Array<{source: number, target: number}> }
+        correlationMatrix?: { metrics: string[], matrix: number[][] }
     }>({})
     const [analysisLoading, setAnalysisLoading] = useState(false)
 
@@ -733,6 +754,8 @@ function LocalEditorContent() {
     // Unified node selection entry point
     const selectNode = useCallback((node: GraphNode | null) => {
         setSelectedNode(node)
+        // Clear highlighted path when selecting a different node
+        setHighlightedPath([])
         // Clear codeLocation when selecting a node (use node's location instead)
         setCodeLocation(null)
         if (node) {
@@ -1153,6 +1176,44 @@ function LocalEditorContent() {
                     return normalizeAndScale(reach, 0, maxReach)
                 }
             }
+            if (sizeMappingMode === 'betweenness' && analysisData.betweenness) {
+                const btw = analysisData.betweenness[nodeId]
+                if (btw !== undefined) {
+                    const values = Object.values(analysisData.betweenness)
+                    return normalizeAndScale(btw, Math.min(...values), Math.max(...values))
+                }
+            }
+            if (sizeMappingMode === 'clustering' && analysisData.clustering) {
+                const clust = analysisData.clustering[nodeId]
+                if (clust !== undefined) {
+                    // Clustering coefficient is already 0-1
+                    return normalizeAndScale(clust, 0, 1)
+                }
+            }
+            // P2: Katz centrality
+            if (sizeMappingMode === 'katz' && analysisData.katz) {
+                const katz = analysisData.katz[nodeId]
+                if (katz !== undefined) {
+                    const values = Object.values(analysisData.katz)
+                    return normalizeAndScale(katz, Math.min(...values), Math.max(...values))
+                }
+            }
+            // P2: Hub score
+            if (sizeMappingMode === 'hub' && analysisData.hub) {
+                const hub = analysisData.hub[nodeId]
+                if (hub !== undefined) {
+                    const values = Object.values(analysisData.hub)
+                    return normalizeAndScale(hub, Math.min(...values), Math.max(...values))
+                }
+            }
+            // P2: Authority score
+            if (sizeMappingMode === 'authority' && analysisData.authority) {
+                const auth = analysisData.authority[nodeId]
+                if (auth !== undefined) {
+                    const values = Object.values(analysisData.authority)
+                    return normalizeAndScale(auth, Math.min(...values), Math.max(...values))
+                }
+            }
             return metaSize // Use original meta size (undefined means use default)
         }
 
@@ -1196,6 +1257,51 @@ function LocalEditorContent() {
                     return COMMUNITY_COLORS[clusterId % COMMUNITY_COLORS.length]
                 }
             }
+            if (colorMappingMode === 'curvature' && analysisData.curvature) {
+                const curv = analysisData.curvature[nodeId]
+                if (curv !== undefined) {
+                    // Map curvature to color: negative (red) -> zero (gray) -> positive (green)
+                    // Typical range is roughly -4 to +2
+                    const normalized = Math.max(-1, Math.min(1, curv / 4))
+                    if (normalized < 0) {
+                        // Negative: red gradient
+                        const intensity = Math.abs(normalized)
+                        return `rgb(${Math.round(239 * intensity + 100 * (1 - intensity))}, ${Math.round(68 * (1 - intensity) + 100 * (1 - intensity))}, ${Math.round(68 * (1 - intensity) + 100 * (1 - intensity))})`
+                    } else {
+                        // Positive: green gradient
+                        const intensity = normalized
+                        return `rgb(${Math.round(34 * (1 - intensity) + 100 * (1 - intensity))}, ${Math.round(197 * intensity + 100 * (1 - intensity))}, ${Math.round(94 * intensity + 100 * (1 - intensity))})`
+                    }
+                }
+                // No curvature data (no incoming edges): neutral gray
+                return '#888888'
+            }
+            if (colorMappingMode === 'anomaly' && analysisData.anomalies) {
+                const isAnomaly = analysisData.anomalies[nodeId]
+                if (isAnomaly) {
+                    return '#ff6b6b' // Bright red for anomalies
+                }
+                return '#4a5568' // Dark gray for normal nodes
+            }
+            // P2: Embedding clusters
+            if (colorMappingMode === 'embedding' && analysisData.embeddingClusters) {
+                const clusterId = analysisData.embeddingClusters[nodeId]
+                if (clusterId !== undefined) {
+                    return COMMUNITY_COLORS[clusterId % COMMUNITY_COLORS.length]
+                }
+            }
+            // P2: Motif participation
+            if (colorMappingMode === 'motif' && analysisData.dominantMotif) {
+                const motif = analysisData.dominantMotif[nodeId]
+                const MOTIF_COLORS: Record<string, string> = {
+                    'chain': '#3b82f6',   // blue
+                    'fork': '#22c55e',    // green
+                    'join': '#f97316',    // orange
+                    'diamond': '#a855f7', // purple
+                    'none': '#6b7280',    // gray
+                }
+                return MOTIF_COLORS[motif] || MOTIF_COLORS['none']
+            }
             return defaultColor
         }
 
@@ -1226,30 +1332,66 @@ function LocalEditorContent() {
                     position: node.position ? [node.position.x, node.position.y, node.position.z] as [number, number, number] : undefined,
                 },
             }))
-    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, COMMUNITY_COLORS, namespaceData])
+    }, [astrolabeNodes, visibleNodes, activeLensId, sizeMappingMode, sizeContrast, analysisData.pagerank, analysisData.indegree, analysisData.betweenness, analysisData.clustering, analysisData.depths, analysisData.bottleneckScores, analysisData.reachability, analysisData.graphDepth, colorMappingMode, analysisData.communities, analysisData.layers, analysisData.numLayers, analysisData.spectralClusters, analysisData.curvature, analysisData.anomalies, analysisData.katz, analysisData.hub, analysisData.authority, analysisData.embeddingClusters, analysisData.dominantMotif, COMMUNITY_COLORS, namespaceData])
 
     const canvasEdges: Edge[] = useMemo(() => {
         const nodeIds = new Set(canvasNodes.map(n => n.id))
+
+        // Build bridge set for quick lookup
+        const bridgeSet = new Set<string>()
+        if (showBridges && analysisData.bridges) {
+            for (const [u, v] of analysisData.bridges) {
+                bridgeSet.add(`${u}->${v}`)
+                bridgeSet.add(`${v}->${u}`) // Bridges are undirected
+            }
+        }
+
+        // Build highlighted path edge set
+        const pathEdgeSet = new Set<string>()
+        if (highlightedPath.length > 1) {
+            for (let i = 0; i < highlightedPath.length - 1; i++) {
+                pathEdgeSet.add(`${highlightedPath[i]}->${highlightedPath[i + 1]}`)
+                pathEdgeSet.add(`${highlightedPath[i + 1]}->${highlightedPath[i]}`) // Both directions
+            }
+        }
+
         // Use backend-returned edge data (including default styles)
         return astrolabeEdges
             .filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-            .map(edge => ({
-                id: edge.id,
-                source: edge.source,
-                target: edge.target,
-                fromLean: edge.fromLean,
-                visible: edge.visible,
-                // Default styles - directly use backend-returned values
-                defaultColor: edge.defaultColor,
-                defaultWidth: edge.defaultWidth,
-                defaultStyle: edge.defaultStyle,
-                // User override styles - from meta.json (color and width removed)
-                meta: {
-                    style: edge.style,
-                    effect: edge.effect,
-                },
-            }))
-    }, [astrolabeEdges, canvasNodes])
+            .map(edge => {
+                const edgeKey = `${edge.source}->${edge.target}`
+                const isBridge = bridgeSet.has(edgeKey)
+                const isOnPath = pathEdgeSet.has(edgeKey)
+
+                // Determine edge color: path > bridge > default
+                let color = edge.defaultColor
+                let width = edge.defaultWidth
+                if (isOnPath) {
+                    color = '#fbbf24' // Yellow for path
+                    width = 3
+                } else if (isBridge) {
+                    color = '#f97316' // Orange for bridges
+                    width = 2.5
+                }
+
+                return {
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    fromLean: edge.fromLean,
+                    visible: edge.visible,
+                    // Default styles - override with bridge/path colors
+                    defaultColor: color,
+                    defaultWidth: width,
+                    defaultStyle: edge.defaultStyle,
+                    // User override styles - from meta.json (color and width removed)
+                    meta: {
+                        style: edge.style,
+                        effect: edge.effect,
+                    },
+                }
+            })
+    }, [astrolabeEdges, canvasNodes, showBridges, analysisData.bridges, highlightedPath])
 
     // Compute namespaces that have nodes on canvas (for highlighting in namespace list)
     const namespacesOnCanvas: Set<string> = useMemo(() => {
@@ -1347,23 +1489,48 @@ function LocalEditorContent() {
             const baseUrl = 'http://127.0.0.1:8765/api/project/analysis'
             const pathParam = `path=${encodeURIComponent(projectPath)}`
 
-            // Fetch all analysis data in parallel
-            const [pagerankRes, degreeRes, communitiesRes, dagRes, spectralRes, entropyRes] = await Promise.all([
-                fetch(`${baseUrl}/pagerank?${pathParam}&top_k=10000`),
-                fetch(`${baseUrl}/degree?${pathParam}`),
-                fetch(`${baseUrl}/communities?${pathParam}`),
-                fetch(`${baseUrl}/dag?${pathParam}&include_all_depths=true&include_all_scores=true`),
-                fetch(`${baseUrl}/spectral?${pathParam}&n_clusters=8`),
-                fetch(`${baseUrl}/entropy?${pathParam}`),
+            // Fetch all analysis data in parallel (each wrapped to handle errors gracefully)
+            const safeFetch = (url: string) => fetch(url).catch(() => null)
+            const [pagerankRes, degreeRes, betweennessRes, clusteringRes, communitiesRes, dagRes, spectralRes, entropyRes, leanTypesRes, curvatureRes, structuralRes, metricsAllRes, embeddingClustersRes, motifParticipationRes, topologyRes, mapperRes, correlationsRes] = await Promise.all([
+                safeFetch(`${baseUrl}/pagerank?${pathParam}&top_k=10000`),
+                safeFetch(`${baseUrl}/degree?${pathParam}`),
+                safeFetch(`${baseUrl}/betweenness?${pathParam}&include_all=true`),
+                safeFetch(`${baseUrl}/clustering?${pathParam}&include_local=true`),
+                safeFetch(`${baseUrl}/communities?${pathParam}`),
+                safeFetch(`${baseUrl}/dag?${pathParam}&include_all_depths=true&include_all_scores=true`),
+                safeFetch(`${baseUrl}/spectral?${pathParam}&n_clusters=8`),
+                safeFetch(`${baseUrl}/entropy?${pathParam}`),
+                safeFetch(`${baseUrl}/lean/types?${pathParam}`),
+                safeFetch(`${baseUrl}/curvature?${pathParam}&include_node_curvatures=true`),
+                safeFetch(`${baseUrl}/structural?${pathParam}`),
+                // P2: Additional metrics
+                safeFetch(`${baseUrl}/metrics/all?${pathParam}`),
+                safeFetch(`${baseUrl}/embedding-clusters?${pathParam}&n_clusters=8`),
+                safeFetch(`${baseUrl}/motif-participation?${pathParam}`),
+                safeFetch(`${baseUrl}/topology?${pathParam}&include_persistent_homology=true`),
+                safeFetch(`${baseUrl}/mapper?${pathParam}`),
+                safeFetch(`${baseUrl}/correlations?${pathParam}`),
             ])
 
-            // Parse responses
-            const pagerankData = pagerankRes.ok ? await pagerankRes.json() : null
-            const degreeData = degreeRes.ok ? await degreeRes.json() : null
-            const communitiesData = communitiesRes.ok ? await communitiesRes.json() : null
-            const dagData = dagRes.ok ? await dagRes.json() : null
-            const spectralData = spectralRes.ok ? await spectralRes.json() : null
-            const entropyData = entropyRes.ok ? await entropyRes.json() : null
+            // Parse responses (handle null from failed fetches)
+            const pagerankData = pagerankRes?.ok ? await pagerankRes.json() : null
+            const degreeData = degreeRes?.ok ? await degreeRes.json() : null
+            const betweennessData = betweennessRes?.ok ? await betweennessRes.json() : null
+            const clusteringData = clusteringRes?.ok ? await clusteringRes.json() : null
+            const communitiesData = communitiesRes?.ok ? await communitiesRes.json() : null
+            const dagData = dagRes?.ok ? await dagRes.json() : null
+            const spectralData = spectralRes?.ok ? await spectralRes.json() : null
+            const entropyData = entropyRes?.ok ? await entropyRes.json() : null
+            const leanTypesData = leanTypesRes?.ok ? await leanTypesRes.json() : null
+            const curvatureData = curvatureRes?.ok ? await curvatureRes.json() : null
+            const structuralData = structuralRes?.ok ? await structuralRes.json() : null
+            // P2 responses
+            const metricsAllData = metricsAllRes?.ok ? await metricsAllRes.json() : null
+            const embeddingClustersData = embeddingClustersRes?.ok ? await embeddingClustersRes.json() : null
+            const motifParticipationData = motifParticipationRes?.ok ? await motifParticipationRes.json() : null
+            const topologyData = topologyRes?.ok ? await topologyRes.json() : null
+            const mapperData = mapperRes?.ok ? await mapperRes.json() : null
+            const correlationsData = correlationsRes?.ok ? await correlationsRes.json() : null
 
 
             // Build pagerank map
@@ -1382,6 +1549,9 @@ function LocalEditorContent() {
                 }
             }
 
+            // Build betweenness map (include_all returns values dict)
+            const betweennessMap: Record<string, number> = betweennessData?.data?.values || {}
+
             // Build communities map from topCommunities
             const communitiesMap: Record<string, number> = {}
             if (communitiesData?.data?.topCommunities) {
@@ -1392,9 +1562,66 @@ function LocalEditorContent() {
                 }
             }
 
+            // Build clustering map (local coefficients)
+            const clusteringMap: Record<string, number> = clusteringData?.data?.local || {}
+
+            // Build curvature map (node curvatures from incoming edges)
+            const curvatureMap: Record<string, number> = curvatureData?.data?.nodeCurvatures || {}
+
+            // Build anomaly map based on betweenness outliers (z-score > 2)
+            const anomalyMap: Record<string, boolean> = {}
+            if (betweennessMap && Object.keys(betweennessMap).length > 0) {
+                const values = Object.values(betweennessMap)
+                const mean = values.reduce((a, b) => a + b, 0) / values.length
+                const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length)
+                if (std > 0) {
+                    for (const [nodeId, value] of Object.entries(betweennessMap)) {
+                        const zScore = Math.abs((value - mean) / std)
+                        anomalyMap[nodeId] = zScore > 2
+                    }
+                }
+            }
+
+            // Extract bridges (convert from {source, target} to [source, target])
+            const bridgesRaw = structuralData?.data?.bridges || []
+            const bridges: Array<[string, string]> = bridgesRaw.map((b: {source: string, target: string}) => [b.source, b.target] as [string, string])
+
+            // P2: Extract katz, hub, authority from metricsAll
+            const katzMap: Record<string, number> = {}
+            const hubMap: Record<string, number> = {}
+            const authorityMap: Record<string, number> = {}
+            if (metricsAllData?.data?.nodeMetrics) {
+                for (const [nodeId, metrics] of Object.entries(metricsAllData.data.nodeMetrics as Record<string, Record<string, number>>)) {
+                    if (metrics.katz !== undefined) katzMap[nodeId] = metrics.katz
+                    if (metrics.hub !== undefined) hubMap[nodeId] = metrics.hub
+                    if (metrics.authority !== undefined) authorityMap[nodeId] = metrics.authority
+                }
+            }
+
+            // P2: Mapper graph
+            const mapperGraph = mapperData?.data ? {
+                nodes: (mapperData.data.mapperNodes || []).map((n: { id: number, size: number, filter_mean: number }) => ({
+                    id: n.id,
+                    size: n.size,
+                    filter_mean: n.filter_mean
+                })),
+                edges: mapperData.data.mapperEdges || []
+            } : undefined
+
+            // P2: Persistence diagrams
+            const persistenceDiagrams = topologyData?.data?.persistentHomology?.diagrams
+
+            // P2: Correlation matrix
+            const correlationMatrix = correlationsData?.data ? {
+                metrics: correlationsData.data.metrics || [],
+                matrix: correlationsData.data.matrix || []
+            } : undefined
+
             setAnalysisData({
                 pagerank: pagerankMap,
                 indegree: indegreeMap,
+                betweenness: betweennessMap,
+                clustering: clusteringMap,
                 communities: communitiesMap,
                 communityCount: communitiesData?.data?.numCommunities,
                 modularity: communitiesData?.data?.modularity,
@@ -1418,6 +1645,23 @@ function LocalEditorContent() {
                 vonNeumannEntropy: entropyData?.data?.vonNeumannEntropy,
                 degreeShannon: entropyData?.data?.degreeShannon,
                 structureEntropy: entropyData?.data?.structureEntropy,
+                // Lean-specific
+                kindDistribution: leanTypesData?.data?.kind_distribution?.counts,
+                // P1: Curvature and anomaly
+                curvature: curvatureMap,
+                anomalies: anomalyMap,
+                bridges: bridges,
+                // P2: Katz, HITS, embedding clusters, motifs
+                katz: Object.keys(katzMap).length > 0 ? katzMap : undefined,
+                hub: Object.keys(hubMap).length > 0 ? hubMap : undefined,
+                authority: Object.keys(authorityMap).length > 0 ? authorityMap : undefined,
+                embeddingClusters: embeddingClustersData?.data?.clusters,
+                numEmbeddingClusters: embeddingClustersData?.data?.numClusters,
+                dominantMotif: motifParticipationData?.data?.dominantMotif,
+                // P2: Visualization data
+                persistenceDiagrams: persistenceDiagrams,
+                mapperGraph: mapperGraph,
+                correlationMatrix: correlationMatrix,
             })
         } catch (error) {
             console.error('Analysis failed:', error)
@@ -2604,6 +2848,21 @@ A node is important if referenced by other important nodes.`} />
 Count of incoming edges. High in-degree = widely used/depended upon.`} />
                                                                         </div>
                                                                     </details>
+                                                                    {/* Betweenness Centrality */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Betweenness Centrality</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$C_B(v) = \\sum_{s \\neq v \\neq t} \\frac{\\sigma_{st}(v)}{\\sigma_{st}}$$
+
+- $\\sigma_{st}$ = number of shortest paths from $s$ to $t$
+- $\\sigma_{st}(v)$ = paths passing through $v$
+
+High betweenness = "bridge" connecting different parts of the graph.`} />
+                                                                        </div>
+                                                                    </details>
                                                                     {/* Community Detection */}
                                                                     <details className="group">
                                                                         <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
@@ -2690,6 +2949,118 @@ May reveal structure that Louvain misses, especially for:
 - Hierarchical module boundaries`} />
                                                                         </div>
                                                                     </details>
+                                                                    {/* Clustering Coefficient */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Clustering Coefficient</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`$$C(v) = \\frac{2 \\cdot |\\{e_{jk}\\}|}{k_v(k_v - 1)}$$
+
+- $k_v$ = degree of node $v$
+- $e_{jk}$ = edges between neighbors of $v$
+
+Measures how much a node's neighbors are connected to each other.
+
+- **High clustering**: Node is in a tightly-knit group
+- **Low clustering**: Node connects disparate parts
+
+*Size Mapping*: Larger nodes = more locally connected.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Kind (Color) */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Kind (Color)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`Colors nodes by Lean declaration type:
+
+- 🟣 **theorem**: Proven propositions
+- 🔵 **lemma**: Helper propositions
+- 🟢 **def**: Definitions
+- 🟡 **axiom**: Axioms/assumptions
+- 🟠 **instance**: Type class instances
+- ⚪ **other**: Other declaration types
+
+Useful for understanding the composition of a proof.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Namespace (Color) */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Namespace (Color)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`Colors nodes by their top-level Lean namespace.
+
+Examples: \`Mathlib.Algebra\`, \`Init.Core\`, \`Std.Data\`
+
+Each namespace gets a distinct color. Useful for:
+- Identifying which modules a proof depends on
+- Understanding cross-module dependencies
+- Finding code organization patterns`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Layer (Color) */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Layer (Color)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`Colors nodes by topological layer (dependency depth).
+
+Light blue → Dark blue gradient:
+- **Light**: Low depth (axioms, basic definitions)
+- **Dark**: High depth (complex theorems)
+
+Same as Depth in Size Mapping, but visualized as color gradient.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Curvature (Color) */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Curvature (Color)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`Forman-Ricci curvature from differential geometry:
+$$F(e) = 4 - d(v_1) - d(v_2)$$
+
+Node curvature = average of incoming edge curvatures.
+
+- 🔴 **Negative** (red): Branching points, fundamental lemmas
+- ⚪ **Zero** (gray): Linear chains, no incoming edges
+- 🟢 **Positive** (green): Tightly clustered regions
+
+Identifies structural "shape" of the proof network.`} />
+                                                                        </div>
+                                                                    </details>
+                                                                    {/* Anomaly (Color) */}
+                                                                    <details className="group">
+                                                                        <summary className="cursor-pointer text-white/80 hover:text-white py-2 px-3 bg-white/5 rounded-lg flex items-center gap-2">
+                                                                            <ChevronDownIcon className="w-4 h-4 transition-transform group-open:rotate-180" />
+                                                                            <span className="font-medium">Anomaly (Color)</span>
+                                                                        </summary>
+                                                                        <div className="mt-2 ml-6 pb-2">
+                                                                            <MarkdownRenderer content={`Highlights statistically unusual nodes using z-score:
+$$z = \\frac{x - \\mu}{\\sigma}$$
+
+- 🔴 **Red**: Anomaly ($|z| > 2$, ~5% of nodes)
+- ⚫ **Gray**: Normal
+
+Based on betweenness centrality outliers.
+
+Anomalies may indicate:
+- Critical bridge nodes
+- Unusual dependency patterns
+- Potential refactoring candidates`} />
+                                                                        </div>
+                                                                    </details>
                                                                 </div>
                                                                 {/* Graph Statistics */}
                                                                 {(analysisData.density !== undefined || analysisData.vonNeumannEntropy !== undefined) && (
@@ -2726,6 +3097,12 @@ May reveal structure that Louvain misses, especially for:
                                                                                     <div className="text-white font-medium">{analysisData.modularity.toFixed(4)}</div>
                                                                                 </div>
                                                                             )}
+                                                                            {analysisData.bridges && analysisData.bridges.length > 0 && (
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Bridges</div>
+                                                                                    <div className="text-white font-medium">{analysisData.bridges.length}</div>
+                                                                                </div>
+                                                                            )}
                                                                             {analysisData.vonNeumannEntropy !== undefined && (
                                                                                 <div className="bg-white/5 rounded px-3 py-2">
                                                                                     <div className="text-white/40 text-xs">Von Neumann Entropy</div>
@@ -2734,7 +3111,7 @@ May reveal structure that Louvain misses, especially for:
                                                                             )}
                                                                             {analysisData.degreeShannon !== undefined && (
                                                                                 <div className="bg-white/5 rounded px-3 py-2">
-                                                                                    <div className="text-white/40 text-xs">Degree Shannon Entropy</div>
+                                                                                    <div className="text-white/40 text-xs">Degree Shannon</div>
                                                                                     <div className="text-white font-medium">{analysisData.degreeShannon.toFixed(4)}</div>
                                                                                 </div>
                                                                             )}
@@ -2747,39 +3124,236 @@ May reveal structure that Louvain misses, especially for:
                                                                         </div>
                                                                     </div>
                                                                 )}
-                                                                {/* DAG Statistics Summary */}
-                                                                {analysisData.graphDepth !== undefined && (
+                                                                {/* Lean Statistics (DAG + Declaration Kinds) */}
+                                                                {(analysisData.graphDepth !== undefined || (analysisData.kindDistribution && Object.keys(analysisData.kindDistribution).length > 0)) && (
                                                                     <div className="mt-4 pt-4 border-t border-white/10">
-                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">DAG Statistics</h3>
-                                                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                                                            <div className="bg-white/5 rounded px-3 py-2">
-                                                                                <div className="text-white/40 text-xs">Graph Depth</div>
-                                                                                <div className="text-white font-medium">{analysisData.graphDepth}</div>
+                                                                        <h3 className="text-sm font-medium text-white/80 mb-2">Lean Statistics</h3>
+                                                                        {/* DAG metrics */}
+                                                                        {analysisData.graphDepth !== undefined && (
+                                                                            <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Proof Depth</div>
+                                                                                    <div className="text-white font-medium">{analysisData.graphDepth}</div>
+                                                                                </div>
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Layers</div>
+                                                                                    <div className="text-white font-medium">{analysisData.numLayers}</div>
+                                                                                </div>
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Axioms/Defs</div>
+                                                                                    <div className="text-white font-medium">{analysisData.sources?.length ?? 0}</div>
+                                                                                </div>
+                                                                                <div className="bg-white/5 rounded px-3 py-2">
+                                                                                    <div className="text-white/40 text-xs">Terminals</div>
+                                                                                    <div className="text-white font-medium">{analysisData.sinks?.length ?? 0}</div>
+                                                                                </div>
                                                                             </div>
-                                                                            <div className="bg-white/5 rounded px-3 py-2">
-                                                                                <div className="text-white/40 text-xs">Layers</div>
-                                                                                <div className="text-white font-medium">{analysisData.numLayers}</div>
-                                                                            </div>
-                                                                            <div className="bg-white/5 rounded px-3 py-2">
-                                                                                <div className="text-white/40 text-xs">Sources (Axioms)</div>
-                                                                                <div className="text-white font-medium">{analysisData.sources?.length ?? 0}</div>
-                                                                            </div>
-                                                                            <div className="bg-white/5 rounded px-3 py-2">
-                                                                                <div className="text-white/40 text-xs">Sinks (Terminals)</div>
-                                                                                <div className="text-white font-medium">{analysisData.sinks?.length ?? 0}</div>
-                                                                            </div>
-                                                                        </div>
+                                                                        )}
                                                                         {analysisData.criticalPath && analysisData.criticalPath.length > 0 && (
-                                                                            <div className="mt-2 bg-white/5 rounded px-3 py-2">
-                                                                                <div className="text-white/40 text-xs mb-1">Critical Path ({analysisData.criticalPath.length} nodes)</div>
+                                                                            <div className="mb-3 bg-white/5 rounded px-3 py-2">
+                                                                                <div className="text-white/40 text-xs mb-1">Longest Chain ({analysisData.criticalPath.length} nodes)</div>
                                                                                 <div className="text-white/60 text-xs font-mono truncate">
                                                                                     {analysisData.criticalPath.slice(0, 3).join(' → ')}
                                                                                     {analysisData.criticalPath.length > 3 && ` → ... → ${analysisData.criticalPath[analysisData.criticalPath.length - 1]}`}
                                                                                 </div>
                                                                             </div>
                                                                         )}
+                                                                        {/* Declaration Kinds */}
+                                                                        {analysisData.kindDistribution && Object.keys(analysisData.kindDistribution).length > 0 && (
+                                                                            <div>
+                                                                                <div className="text-white/40 text-xs mb-2">Declaration Kinds</div>
+                                                                                <div className="space-y-1">
+                                                                                    {Object.entries(analysisData.kindDistribution)
+                                                                                        .sort((a, b) => b[1] - a[1])
+                                                                                        .slice(0, 8)
+                                                                                        .map(([kind, count]) => {
+                                                                                            const total = Object.values(analysisData.kindDistribution!).reduce((a, b) => a + b, 0)
+                                                                                            const percentage = ((count / total) * 100).toFixed(1)
+                                                                                            return (
+                                                                                                <div key={kind} className="flex items-center gap-2">
+                                                                                                    <div className="w-16 text-xs text-white/60 truncate" title={kind}>{kind}</div>
+                                                                                                    <div className="flex-1 bg-white/10 rounded-full h-2 overflow-hidden">
+                                                                                                        <div
+                                                                                                            className="h-full bg-blue-500/60 rounded-full"
+                                                                                                            style={{ width: `${percentage}%` }}
+                                                                                                        />
+                                                                                                    </div>
+                                                                                                    <div className="w-12 text-xs text-white/40 text-right">{count}</div>
+                                                                                                </div>
+                                                                                            )
+                                                                                        })}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 )}
+
+                                                                {/* P2: Advanced Visualizations */}
+                                                                <div className="mt-4 pt-4 border-t border-white/10">
+                                                                    <h3 className="text-sm font-medium text-white/80 mb-2">Advanced Analysis</h3>
+                                                                    <div className="space-y-2">
+                                                                        {/* Persistence Diagram */}
+                                                                        <details className="group bg-white/5 rounded-lg">
+                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-2 text-xs flex items-center gap-2">
+                                                                                <ChevronDownIcon className="w-3 h-3 transition-transform group-open:rotate-180" />
+                                                                                Persistence Diagram
+                                                                                {!analysisData.persistenceDiagrams && <span className="text-white/30 ml-1">(loading...)</span>}
+                                                                            </summary>
+                                                                            {analysisData.persistenceDiagrams && (
+                                                                                <div className="p-3 pt-0">
+                                                                                    <div className="bg-black/30 rounded p-2 h-40 relative">
+                                                                                        {/* Simple scatter plot for birth/death */}
+                                                                                        <svg viewBox="0 0 100 100" className="w-full h-full">
+                                                                                            {/* Diagonal line (birth = death) */}
+                                                                                            <line x1="0" y1="100" x2="100" y2="0" stroke="#444" strokeWidth="0.5" />
+                                                                                            {/* Axis labels */}
+                                                                                            <text x="50" y="98" fontSize="6" fill="#888" textAnchor="middle">birth</text>
+                                                                                            <text x="2" y="50" fontSize="6" fill="#888" transform="rotate(-90 5 50)">death</text>
+                                                                                            {/* H0 points (dimension 0) */}
+                                                                                            {(analysisData.persistenceDiagrams['0'] || []).slice(0, 50).map((pt, i) => (
+                                                                                                <circle
+                                                                                                    key={`h0-${i}`}
+                                                                                                    cx={pt.birth * 100}
+                                                                                                    cy={100 - (pt.death !== null ? pt.death * 100 : 100)}
+                                                                                                    r="2"
+                                                                                                    fill="#3b82f6"
+                                                                                                    opacity="0.7"
+                                                                                                />
+                                                                                            ))}
+                                                                                            {/* H1 points (dimension 1) */}
+                                                                                            {(analysisData.persistenceDiagrams['1'] || []).slice(0, 50).map((pt, i) => (
+                                                                                                <circle
+                                                                                                    key={`h1-${i}`}
+                                                                                                    cx={pt.birth * 100}
+                                                                                                    cy={100 - (pt.death !== null ? pt.death * 100 : 100)}
+                                                                                                    r="2"
+                                                                                                    fill="#f97316"
+                                                                                                    opacity="0.7"
+                                                                                                />
+                                                                                            ))}
+                                                                                        </svg>
+                                                                                        <div className="absolute bottom-1 right-1 text-[8px] text-white/40">
+                                                                                            <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1" />H₀
+                                                                                            <span className="inline-block w-2 h-2 bg-orange-500 rounded-full ml-2 mr-1" />H₁
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-white/40 mt-1">
+                                                                                        Points far from diagonal = long-lived features
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </details>
+
+                                                                        {/* Mapper Graph */}
+                                                                        <details className="group bg-white/5 rounded-lg">
+                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-2 text-xs flex items-center gap-2">
+                                                                                <ChevronDownIcon className="w-3 h-3 transition-transform group-open:rotate-180" />
+                                                                                Mapper Graph
+                                                                                {!analysisData.mapperGraph && <span className="text-white/30 ml-1">(loading...)</span>}
+                                                                            </summary>
+                                                                            {analysisData.mapperGraph && (
+                                                                                <div className="p-3 pt-0">
+                                                                                    <div className="bg-black/30 rounded p-2 h-40 relative">
+                                                                                        <svg viewBox="0 0 100 100" className="w-full h-full">
+                                                                                            {/* Simple force-directed-ish layout based on id */}
+                                                                                            {analysisData.mapperGraph.edges.map((e, i) => {
+                                                                                                const nodes = analysisData.mapperGraph!.nodes
+                                                                                                const s = nodes.find(n => n.id === e.source)
+                                                                                                const t = nodes.find(n => n.id === e.target)
+                                                                                                if (!s || !t) return null
+                                                                                                // Position by filter_mean (x) and id (y with jitter)
+                                                                                                const sx = s.filter_mean * 80 + 10
+                                                                                                const sy = 20 + (s.id % 6) * 12
+                                                                                                const tx = t.filter_mean * 80 + 10
+                                                                                                const ty = 20 + (t.id % 6) * 12
+                                                                                                return (
+                                                                                                    <line key={`edge-${i}`} x1={sx} y1={sy} x2={tx} y2={ty} stroke="#666" strokeWidth="0.5" />
+                                                                                                )
+                                                                                            })}
+                                                                                            {analysisData.mapperGraph.nodes.map((n) => {
+                                                                                                const x = n.filter_mean * 80 + 10
+                                                                                                const y = 20 + (n.id % 6) * 12
+                                                                                                const r = Math.max(2, Math.min(8, Math.sqrt(n.size)))
+                                                                                                return (
+                                                                                                    <circle
+                                                                                                        key={`node-${n.id}`}
+                                                                                                        cx={x}
+                                                                                                        cy={y}
+                                                                                                        r={r}
+                                                                                                        fill="#22c55e"
+                                                                                                        opacity="0.8"
+                                                                                                    >
+                                                                                                        <title>Cluster {n.id}: {n.size} nodes</title>
+                                                                                                    </circle>
+                                                                                                )
+                                                                                            })}
+                                                                                        </svg>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-white/40 mt-1">
+                                                                                        {analysisData.mapperGraph.nodes.length} clusters, {analysisData.mapperGraph.edges.length} connections
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </details>
+
+                                                                        {/* Correlation Heatmap */}
+                                                                        <details className="group bg-white/5 rounded-lg">
+                                                                            <summary className="cursor-pointer text-white/70 hover:text-white p-2 text-xs flex items-center gap-2">
+                                                                                <ChevronDownIcon className="w-3 h-3 transition-transform group-open:rotate-180" />
+                                                                                Metric Correlations
+                                                                                {!analysisData.correlationMatrix && <span className="text-white/30 ml-1">(loading...)</span>}
+                                                                            </summary>
+                                                                            {analysisData.correlationMatrix && analysisData.correlationMatrix.metrics.length > 0 && (
+                                                                                <div className="p-3 pt-0">
+                                                                                    <div className="bg-black/30 rounded p-2 overflow-x-auto">
+                                                                                        <table className="text-[8px] text-white/60 w-full">
+                                                                                            <thead>
+                                                                                                <tr>
+                                                                                                    <th className="p-1"></th>
+                                                                                                    {analysisData.correlationMatrix.metrics.map(m => (
+                                                                                                        <th key={m} className="p-1 font-normal truncate max-w-[40px]" title={m}>
+                                                                                                            {m.slice(0, 4)}
+                                                                                                        </th>
+                                                                                                    ))}
+                                                                                                </tr>
+                                                                                            </thead>
+                                                                                            <tbody>
+                                                                                                {analysisData.correlationMatrix.matrix.map((row, i) => (
+                                                                                                    <tr key={i}>
+                                                                                                        <td className="p-1 font-normal truncate max-w-[40px]" title={analysisData.correlationMatrix!.metrics[i]}>
+                                                                                                            {analysisData.correlationMatrix!.metrics[i].slice(0, 4)}
+                                                                                                        </td>
+                                                                                                        {row.map((val, j) => {
+                                                                                                            // Color: negative = red, positive = green, zero = gray
+                                                                                                            const intensity = Math.abs(val)
+                                                                                                            const bg = val > 0.1 ? `rgba(34, 197, 94, ${intensity * 0.8})`
+                                                                                                                    : val < -0.1 ? `rgba(239, 68, 68, ${intensity * 0.8})`
+                                                                                                                    : 'transparent'
+                                                                                                            return (
+                                                                                                                <td
+                                                                                                                    key={j}
+                                                                                                                    className="p-1 text-center"
+                                                                                                                    style={{ backgroundColor: bg }}
+                                                                                                                    title={`${analysisData.correlationMatrix!.metrics[i]} vs ${analysisData.correlationMatrix!.metrics[j]}: ${val.toFixed(2)}`}
+                                                                                                                >
+                                                                                                                    {val.toFixed(1)}
+                                                                                                                </td>
+                                                                                                            )
+                                                                                                        })}
+                                                                                                    </tr>
+                                                                                                ))}
+                                                                                            </tbody>
+                                                                                        </table>
+                                                                                    </div>
+                                                                                    <div className="text-[10px] text-white/40 mt-1">
+                                                                                        🟢 positive, 🔴 negative correlation (Spearman)
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </details>
+                                                                    </div>
+                                                                </div>
+
                                                                 <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">
                                                                     Click anywhere to close
                                                                 </div>
@@ -2966,40 +3540,128 @@ $$F_c = k_c \\cdot d_{center}$$
                                                             </div>
                                                         </div>
                                                     )}
-                                                    {!collapsedSections.has('analysis') && (
-                                                    <div className="ml-5 mt-2 space-y-3">
-                                                        {/* Size Mapping */}
-                                                        <div>
-                                                            <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
-                                                            <div className="flex flex-wrap gap-1 mt-1">
-                                                                {([
-                                                                    { mode: 'default' as const, label: 'Default', data: true, tooltip: 'Uniform node size' },
-                                                                    { mode: 'pagerank' as const, label: 'PageRank', data: analysisData.pagerank, tooltip: 'Size by importance (referenced by important nodes)' },
-                                                                    { mode: 'indegree' as const, label: 'In-deg', data: analysisData.indegree, tooltip: 'Size by number of incoming edges (how many depend on it)' },
-                                                                    { mode: 'depth' as const, label: 'Depth', data: analysisData.depths, tooltip: 'Size by dependency depth (distance from axioms)' },
-                                                                    { mode: 'bottleneck' as const, label: 'Bottleneck', data: analysisData.bottleneckScores, tooltip: 'Size by bottleneck score (dependents / dependencies ratio)' },
-                                                                    { mode: 'reachability' as const, label: 'Reach', data: analysisData.reachability, tooltip: 'Size by reachability (how many nodes depend on this transitively)' },
-                                                                ]).map(({ mode, label, data, tooltip }) => (
-                                                                    <button
-                                                                        key={mode}
-                                                                        title={tooltip}
-                                                                        onClick={() => setSizeMappingMode(mode)}
-                                                                        className={`px-2 py-1 text-[10px] rounded transition-colors ${
-                                                                            sizeMappingMode === mode
-                                                                                ? 'bg-blue-500/30 text-blue-300'
-                                                                                : 'bg-white/10 text-white/60 hover:bg-white/20'
-                                                                        } ${!data ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                                                        disabled={!data}
-                                                                    >
-                                                                        {label}
-                                                                    </button>
-                                                                ))}
+                                                    {/* Color Mapping Info Modal */}
+                                                    {expandedInfoTips.has('colorMapping') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('colorMapping'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Color Mapping Options</h2>
+                                                                <div className="space-y-3 text-sm">
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Kind</div>
+                                                                        <div className="text-white/60">Color by Lean declaration type: theorem (purple), lemma (blue), def (green), axiom (yellow), instance (orange).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Namespace</div>
+                                                                        <div className="text-white/60">Color by top-level namespace (e.g., Mathlib.Algebra, Init.Core). Each namespace gets a distinct color.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Community</div>
+                                                                        <div className="text-white/60">Louvain algorithm groups densely connected nodes. Same color = same community.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Layer</div>
+                                                                        <div className="text-white/60">Light→dark blue gradient by dependency depth. Light = axioms/defs, Dark = complex theorems.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Spectral</div>
+                                                                        <div className="text-white/60">Graph Laplacian eigenvector clustering. May reveal structure Louvain misses.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Curvature</div>
+                                                                        <div className="text-white/60">Forman-Ricci curvature: 🔴 negative = branching points, ⚪ zero = linear chains, 🟢 positive = clustered regions.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Anomaly</div>
+                                                                        <div className="text-white/60">Highlights statistical outliers (z-score {">"} 2). 🔴 Red = anomaly, ⚫ Gray = normal.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Embedding</div>
+                                                                        <div className="text-white/60">Spectral embedding + k-means clustering. Groups structurally similar nodes.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Motif</div>
+                                                                        <div className="text-white/60">Dominant motif pattern: 🔵 chain, 🟢 fork, 🟠 join, 🟣 diamond, ⚫ none.</div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
                                                             </div>
                                                         </div>
-
+                                                    )}
+                                                    {/* Size Mapping Info Modal */}
+                                                    {expandedInfoTips.has('sizeMapping') && (
+                                                        <div
+                                                            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+                                                            onClick={() => setExpandedInfoTips(prev => { const next = new Set(prev); next.delete('sizeMapping'); return next })}
+                                                        >
+                                                            <div className="bg-gray-900 border border-white/20 rounded-xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                                                <h2 className="text-lg text-white font-medium mb-3">Size Mapping Options</h2>
+                                                                <div className="space-y-3 text-sm">
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Default</div>
+                                                                        <div className="text-white/60">Uniform node size. All nodes same size.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">PageRank</div>
+                                                                        <div className="text-white/60">Node importance: larger = referenced by other important nodes. Like Google's original algorithm.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">In-deg</div>
+                                                                        <div className="text-white/60">Incoming edge count: larger = more nodes depend on it directly.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Between</div>
+                                                                        <div className="text-white/60">Betweenness centrality: larger = more shortest paths pass through this node (bridge/connector).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Depth</div>
+                                                                        <div className="text-white/60">Dependency depth: larger = further from axioms (more abstract theorems).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Bottleneck</div>
+                                                                        <div className="text-white/60">Dependents/dependencies ratio: larger = foundational lemma (many depend on it, it depends on few).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Reach</div>
+                                                                        <div className="text-white/60">Transitive dependents: larger = breaking this affects more theorems.</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Cluster</div>
+                                                                        <div className="text-white/60">Clustering coefficient: larger = neighbors are well-connected (tightly-knit group).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Katz</div>
+                                                                        <div className="text-white/60">Katz centrality: larger = more influence via all walks (better for DAGs than PageRank).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Hub</div>
+                                                                        <div className="text-white/60">HITS hub score: larger = points to many good authorities (comprehensive proofs).</div>
+                                                                    </div>
+                                                                    <div className="bg-white/5 rounded-lg p-3">
+                                                                        <div className="font-medium text-white mb-1">Authority</div>
+                                                                        <div className="text-white/60">HITS authority score: larger = pointed to by many good hubs (fundamental theorems).</div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-xs text-white/30 pt-3 mt-3 border-t border-white/10 text-center">Click anywhere to close</div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {!collapsedSections.has('analysis') && (
+                                                    <div className="ml-5 mt-2 space-y-3">
                                                         {/* Color Mapping */}
                                                         <div>
-                                                            <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
+                                                            <div className="flex items-center gap-1">
+                                                                <label className="text-[10px] text-white/40 uppercase tracking-wider">Color Mapping</label>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => new Set(prev).add('colorMapping'))}
+                                                                    className="text-white/30 hover:text-white/60 transition-colors"
+                                                                    title="Color mapping options explained"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
                                                             <div className="flex flex-wrap gap-1 mt-1">
                                                                 {([
                                                                     { mode: 'kind' as const, label: 'Kind', data: true, tooltip: 'Color by node type (theorem, lemma, def, etc.)' },
@@ -3007,6 +3669,10 @@ $$F_c = k_c \\cdot d_{center}$$
                                                                     { mode: 'community' as const, label: 'Community', data: analysisData.communities, tooltip: 'Color by Louvain community detection' },
                                                                     { mode: 'layer' as const, label: 'Layer', data: analysisData.layers, tooltip: 'Color by topological layer (dependency depth)' },
                                                                     { mode: 'spectral' as const, label: 'Spectral', data: analysisData.spectralClusters, tooltip: 'Color by spectral clustering (graph Laplacian)' },
+                                                                    { mode: 'curvature' as const, label: 'Curvature', data: analysisData.curvature, tooltip: 'Color by Ricci curvature (red=branching, green=clustered)' },
+                                                                    { mode: 'anomaly' as const, label: 'Anomaly', data: analysisData.anomalies, tooltip: 'Highlight anomalous nodes (red=anomaly, gray=normal)' },
+                                                                    { mode: 'embedding' as const, label: 'Embedding', data: analysisData.embeddingClusters, tooltip: 'Color by spectral embedding + k-means clusters' },
+                                                                    { mode: 'motif' as const, label: 'Motif', data: analysisData.dominantMotif, tooltip: 'Color by dominant motif pattern (chain/fork/join/diamond)' },
                                                                 ]).map(({ mode, label, data, tooltip }) => (
                                                                     <button
                                                                         key={mode}
@@ -3025,7 +3691,50 @@ $$F_c = k_c \\cdot d_{center}$$
                                                             </div>
                                                         </div>
 
-                                                        {/* Size Contrast slider - only show when PageRank or In-degree is active */}
+                                                        {/* Size Mapping */}
+                                                        <div>
+                                                            <div className="flex items-center gap-1">
+                                                                <label className="text-[10px] text-white/40 uppercase tracking-wider">Size Mapping</label>
+                                                                <button
+                                                                    onClick={() => setExpandedInfoTips(prev => new Set(prev).add('sizeMapping'))}
+                                                                    className="text-white/30 hover:text-white/60 transition-colors"
+                                                                    title="Size mapping options explained"
+                                                                >
+                                                                    <InformationCircleIcon className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {([
+                                                                    { mode: 'default' as const, label: 'Default', data: true, tooltip: 'Uniform node size' },
+                                                                    { mode: 'pagerank' as const, label: 'PageRank', data: analysisData.pagerank, tooltip: 'Size by importance (referenced by important nodes)' },
+                                                                    { mode: 'indegree' as const, label: 'In-deg', data: analysisData.indegree, tooltip: 'Size by number of incoming edges (how many depend on it)' },
+                                                                    { mode: 'betweenness' as const, label: 'Between', data: analysisData.betweenness, tooltip: 'Size by betweenness centrality (bridge nodes connecting different parts)' },
+                                                                    { mode: 'depth' as const, label: 'Depth', data: analysisData.depths, tooltip: 'Size by dependency depth (distance from axioms)' },
+                                                                    { mode: 'bottleneck' as const, label: 'Bottleneck', data: analysisData.bottleneckScores, tooltip: 'Size by bottleneck score (dependents / dependencies ratio)' },
+                                                                    { mode: 'reachability' as const, label: 'Reach', data: analysisData.reachability, tooltip: 'Size by reachability (how many nodes depend on this transitively)' },
+                                                                    { mode: 'clustering' as const, label: 'Cluster', data: analysisData.clustering, tooltip: 'Size by clustering coefficient (local connectivity)' },
+                                                                    { mode: 'katz' as const, label: 'Katz', data: analysisData.katz, tooltip: 'Size by Katz centrality (walks-based influence)' },
+                                                                    { mode: 'hub' as const, label: 'Hub', data: analysisData.hub, tooltip: 'Size by hub score (comprehensive proofs)' },
+                                                                    { mode: 'authority' as const, label: 'Authority', data: analysisData.authority, tooltip: 'Size by authority score (fundamental theorems)' },
+                                                                ]).map(({ mode, label, data, tooltip }) => (
+                                                                    <button
+                                                                        key={mode}
+                                                                        title={tooltip}
+                                                                        onClick={() => setSizeMappingMode(mode)}
+                                                                        className={`px-2 py-1 text-[10px] rounded transition-colors ${
+                                                                            sizeMappingMode === mode
+                                                                                ? 'bg-blue-500/30 text-blue-300'
+                                                                                : 'bg-white/10 text-white/60 hover:bg-white/20'
+                                                                        } ${!data ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                        disabled={!data}
+                                                                    >
+                                                                        {label}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Size Contrast slider - only show when Size Mapping is active */}
                                                         {sizeMappingMode !== 'default' && (
                                                             <div>
                                                                 <input
@@ -3283,6 +3992,20 @@ $$F_c = k_c \\cdot d_{center}$$
                                     title={showLabels ? 'Hide Labels' : 'Show Labels'}
                                 >
                                     <TagIcon className="w-4 h-4" />
+                                </button>
+
+                                {/* Show Bridges toggle */}
+                                <button
+                                    onClick={() => setShowBridges(!showBridges)}
+                                    className={`p-1.5 rounded transition-colors ${
+                                        showBridges ? 'bg-orange-500/30 text-orange-400' : 'bg-black/60 text-white/40 hover:text-white'
+                                    }`}
+                                    title={showBridges ? 'Hide Bridges' : 'Show Bridges (critical edges)'}
+                                    disabled={!analysisData.bridges || analysisData.bridges.length === 0}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
                                 </button>
 
                                 {/* Add custom node button */}
@@ -3564,27 +4287,58 @@ $$F_c = k_c \\cdot d_{center}$$
                                                     <div className="mt-2 p-2 bg-black/20 rounded-md">
                                                         {toolPanelView === 'edges' && (
                                                             <div className="space-y-2">
-                                                                {/* Add Edge button / Adding mode indicator */}
-                                                                {isAddingEdge ? (
-                                                                    <div className="p-1.5 bg-green-500/20 border border-green-500/30 rounded text-xs flex items-center justify-between">
-                                                                        <span className="text-green-400">Click node to connect</span>
-                                                                        <button onClick={cancelAddingEdge} className="text-white/50 hover:text-white">
-                                                                            <XMarkIcon className="w-3.5 h-3.5" />
+                                                                {/* Action buttons row */}
+                                                                <div className="flex gap-1">
+                                                                    {/* Add Edge button / Adding mode indicator */}
+                                                                    {isAddingEdge ? (
+                                                                        <div className="flex-1 p-1.5 bg-green-500/20 border border-green-500/30 rounded text-xs flex items-center justify-between">
+                                                                            <span className="text-green-400">Click node to connect</span>
+                                                                            <button onClick={cancelAddingEdge} className="text-white/50 hover:text-white">
+                                                                                <XMarkIcon className="w-3.5 h-3.5" />
+                                                                            </button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setAddingEdgeDirection('outgoing')
+                                                                                setIsAddingEdge(true)
+                                                                                setIsRemovingNodes(false)
+                                                                            }}
+                                                                            className="flex-1 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                        >
+                                                                            <PlusIcon className="w-3.5 h-3.5" />
+                                                                            <span>Add Edge</span>
                                                                         </button>
-                                                                    </div>
-                                                                ) : (
+                                                                    )}
+                                                                    {/* Highlight Path to Selected button */}
                                                                     <button
-                                                                        onClick={() => {
-                                                                            setAddingEdgeDirection('outgoing')
-                                                                            setIsAddingEdge(true)
-                                                                            setIsRemovingNodes(false)
+                                                                        onClick={async () => {
+                                                                            if (!projectPath || !selectedNode) return
+                                                                            try {
+                                                                                const res = await fetch(
+                                                                                    `http://127.0.0.1:8765/api/project/analysis/critical-path?path=${encodeURIComponent(projectPath)}&target=${encodeURIComponent(selectedNode.id)}`
+                                                                                )
+                                                                                if (res.ok) {
+                                                                                    const data = await res.json()
+                                                                                    if (data.data?.path) {
+                                                                                        setHighlightedPath(data.data.path)
+                                                                                    }
+                                                                                }
+                                                                            } catch (e) {
+                                                                                console.error('Failed to fetch critical path:', e)
+                                                                            }
                                                                         }}
-                                                                        className="w-full py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                        className={`py-1.5 px-2 text-xs rounded transition-colors flex items-center gap-1 ${
+                                                                            highlightedPath.includes(selectedNode.id)
+                                                                                ? 'bg-yellow-500/30 text-yellow-400'
+                                                                                : 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-400'
+                                                                        }`}
+                                                                        title="Highlight longest dependency path to this node"
                                                                     >
-                                                                        <PlusIcon className="w-3.5 h-3.5" />
-                                                                        <span>Add Edge</span>
+                                                                        <ArrowLongRightIcon className="w-3.5 h-3.5" />
+                                                                        <span>Path</span>
                                                                     </button>
-                                                                )}
+                                                                </div>
 
                                                                 {/* Unified Edges List */}
                                                                 {(() => {

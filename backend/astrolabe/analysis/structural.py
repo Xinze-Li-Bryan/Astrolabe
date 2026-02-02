@@ -109,10 +109,17 @@ def compute_hits(
     if G.number_of_nodes() == 0:
         return {}, {}
 
-    # Use NetworkX's HITS implementation
-    hubs, authorities = nx.hits(G, max_iter=max_iter, tol=tol, normalized=normalized)
-
-    return hubs, authorities
+    try:
+        # Use NetworkX's HITS implementation
+        hubs, authorities = nx.hits(G, max_iter=max_iter, tol=tol, normalized=normalized)
+        return hubs, authorities
+    except nx.PowerIterationFailedConvergence:
+        # HITS may fail to converge on sparse graphs, try with more iterations
+        try:
+            hubs, authorities = nx.hits(G, max_iter=max_iter * 5, tol=tol * 10, normalized=normalized)
+            return hubs, authorities
+        except Exception:
+            return {}, {}
 
 
 def get_top_hubs(G: nx.DiGraph, k: int = 10) -> List[Tuple[str, float]]:
@@ -206,8 +213,14 @@ def compute_katz_centrality(
             return katz
         except nx.PowerIterationFailedConvergence:
             # Fall back to numpy-based computation
-            katz = nx.katz_centrality_numpy(G, alpha=alpha / 4, beta=beta, normalized=normalized)
-            return katz
+            try:
+                katz = nx.katz_centrality_numpy(G, alpha=alpha / 4, beta=beta, normalized=normalized)
+                return katz
+            except Exception:
+                return {}
+    except Exception:
+        # Catch any other exceptions (numpy errors, etc.)
+        return {}
 
 
 # =============================================================================

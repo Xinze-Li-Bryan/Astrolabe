@@ -2482,6 +2482,1004 @@ async def get_hierarchical_clustering(
 
 
 # ============================================
+# Advanced Analysis API (Statistics, Curvature, Geometry, Topology)
+# ============================================
+
+
+@app.get("/api/project/analysis/statistics")
+async def get_statistics_analysis(
+    path: str = Query(..., description="Project path"),
+    fit_distribution: bool = Query(True, description="Fit power law to degree distribution"),
+    compute_correlations: bool = Query(True, description="Compute metric correlations"),
+    detect_anomalies_flag: bool = Query(True, description="Detect anomalous nodes"),
+    anomaly_threshold: float = Query(3.0, description="Z-score threshold for anomaly detection"),
+    top_k: int = Query(20, description="Number of top anomalies to return"),
+):
+    """
+    Comprehensive statistical analysis of the graph.
+
+    Returns:
+        - powerLaw: Power law fit results (alpha, xmin, p-value)
+        - correlations: Correlation matrix between centrality metrics
+        - assortativity: Degree correlation coefficient
+        - anomalies: Nodes with unusual metric combinations
+    """
+    from .analysis.statistics import (
+        fit_degree_distribution,
+        compute_metric_correlations,
+        compute_degree_assortativity,
+        detect_zscore_anomalies,
+    )
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = {}
+
+    # Power law fit
+    if fit_distribution:
+        result["powerLaw"] = fit_degree_distribution(G)
+
+    # Metric correlations
+    if compute_correlations:
+        pagerank = nx.pagerank(G)
+        betweenness = nx.betweenness_centrality(G)
+        in_degree = dict(G.in_degree()) if G.is_directed() else dict(G.degree())
+        out_degree = dict(G.out_degree()) if G.is_directed() else dict(G.degree())
+
+        metrics = {
+            "pagerank": pagerank,
+            "betweenness": betweenness,
+            "in_degree": in_degree,
+            "out_degree": out_degree,
+        }
+        result["correlations"] = compute_metric_correlations(metrics)
+
+    # Assortativity
+    result["assortativity"] = compute_degree_assortativity(G)
+
+    # Anomaly detection
+    if detect_anomalies_flag:
+        pagerank = nx.pagerank(G)
+        betweenness = nx.betweenness_centrality(G)
+        in_degree = dict(G.in_degree()) if G.is_directed() else dict(G.degree())
+
+        metrics = {
+            "pagerank": pagerank,
+            "betweenness": betweenness,
+            "in_degree": in_degree,
+        }
+        anomaly_result = detect_zscore_anomalies(metrics, threshold=anomaly_threshold)
+
+        # Collect anomalies from all metrics
+        all_anomalies = []
+        if "by_metric" in anomaly_result:
+            for metric_name, metric_data in anomaly_result["by_metric"].items():
+                for a in metric_data.get("anomalies", [])[:top_k]:
+                    all_anomalies.append({
+                        "nodeId": a["node"],
+                        "metric": metric_name,
+                        "zScore": a["z_score"],
+                        "value": a["value"],
+                        "direction": a["direction"],
+                    })
+
+        # Sort by absolute z-score
+        all_anomalies.sort(key=lambda x: abs(x["zScore"]), reverse=True)
+        result["anomalies"] = all_anomalies[:top_k]
+        result["multiAnomalyNodes"] = anomaly_result.get("multi_anomaly_nodes", [])
+
+    return {
+        "status": "ok",
+        "analysis": "statistics",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": result,
+    }
+
+
+@app.get("/api/project/analysis/link-prediction")
+async def get_link_prediction(
+    path: str = Query(..., description="Project path"),
+    method: str = Query("adamic_adar", description="Prediction method: common_neighbors, adamic_adar, jaccard, resource_allocation, preferential_attachment"),
+    top_k: int = Query(50, description="Number of top predictions to return"),
+):
+    """
+    Predict missing edges in the dependency graph.
+
+    Identifies potential dependencies that may be missing or could be added.
+    This is useful for discovering implicit relationships between theorems.
+
+    Returns:
+        - predictions: List of predicted edges with scores
+    """
+    from .analysis.link_prediction import predict_links
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    predictions = predict_links(G, method=method, top_k=top_k)
+
+    return {
+        "status": "ok",
+        "analysis": "link-prediction",
+        "method": method,
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": {
+            "predictions": predictions,
+            "numPredictions": len(predictions),
+        },
+    }
+
+
+@app.get("/api/project/analysis/curvature")
+async def get_curvature_analysis(
+    path: str = Query(..., description="Project path"),
+    method: str = Query("forman", description="Curvature method: forman (fast) or ollivier (accurate)"),
+    include_edge_curvatures: bool = Query(False, description="Include all edge curvatures"),
+    include_node_curvatures: bool = Query(True, description="Include node curvatures"),
+    top_k: int = Query(20, description="Number of extreme nodes/edges to return"),
+):
+    """
+    Compute Ricci curvature of the dependency graph.
+
+    Geometric analysis using optimal transport theory:
+    - Positive curvature: Tightly clustered regions
+    - Negative curvature: Branching points, fundamental lemmas
+    - Zero curvature: Linear chains
+
+    Args:
+        method: "forman" (O(E), fast) or "ollivier" (O(V*E), accurate)
+
+    Returns:
+        - statistics: Mean, std, min, max curvature
+        - interpretation: Structural interpretation
+        - mostClustered: Nodes/edges with highest positive curvature
+        - mostBranching: Nodes/edges with highest negative curvature
+    """
+    from .analysis.optimal_transport import analyze_curvature
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    result = analyze_curvature(G, method=method)
+
+    response_data = {
+        "method": result["curvature"].get("method", method),
+        "statistics": result["curvature"].get("statistics", {}),
+        "interpretation": result["curvature"].get("interpretation", {}),
+    }
+
+    # Add highlights
+    if "highlights" in result:
+        response_data["mostClusteredEdges"] = result["highlights"].get("most_clustered_edges", [])[:top_k]
+        response_data["mostBranchingEdges"] = result["highlights"].get("most_branching_edges", [])[:top_k]
+        response_data["mostClusteredNodes"] = result["highlights"].get("most_clustered_nodes", [])[:top_k]
+        response_data["mostBranchingNodes"] = result["highlights"].get("most_branching_nodes", [])[:top_k]
+
+    if include_node_curvatures and "node_curvatures" in result["curvature"]:
+        response_data["nodeCurvatures"] = result["curvature"]["node_curvatures"]
+
+    if include_edge_curvatures and "edge_curvatures" in result["curvature"]:
+        response_data["edgeCurvatures"] = result["curvature"]["edge_curvatures"]
+
+    return {
+        "status": "ok",
+        "analysis": "curvature",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/geometry")
+async def get_geometry_analysis(
+    path: str = Query(..., description="Project path"),
+    include_spectrum: bool = Query(True, description="Include Laplacian spectrum"),
+    include_hks: bool = Query(True, description="Include Heat Kernel Signatures"),
+    num_eigenvalues: int = Query(10, description="Number of eigenvalues to compute"),
+):
+    """
+    Geometric analysis using the graph Laplacian.
+
+    Returns:
+        - spectrum: Laplacian eigenvalues and Fiedler vector
+        - hks: Heat Kernel Signature for multi-scale node analysis
+        - algebraicConnectivity: Fiedler value (2nd smallest eigenvalue)
+    """
+    from .analysis.geometry import compute_laplacian_spectrum, compute_heat_kernel_signature
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    response_data = {}
+
+    if include_spectrum:
+        spectrum = compute_laplacian_spectrum(G, k=num_eigenvalues)
+        response_data["spectrum"] = spectrum
+
+    if include_hks and G.number_of_nodes() <= 2000:
+        hks = compute_heat_kernel_signature(G)
+        # Only include statistics and top nodes, not full HKS
+        if "error" not in hks:
+            response_data["hks"] = {
+                "timeScales": hks.get("time_scales", []),
+                "statistics": hks.get("statistics", {}),
+                "interpretation": hks.get("interpretation", ""),
+            }
+        else:
+            response_data["hks"] = hks
+    elif include_hks:
+        response_data["hks"] = {"note": "Skipped for large graph (>2000 nodes)"}
+
+    return {
+        "status": "ok",
+        "analysis": "geometry",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/topology")
+async def get_topology_analysis(
+    path: str = Query(..., description="Project path"),
+    include_persistent_homology: bool = Query(True, description="Include persistent homology (requires gudhi)"),
+    filtration: str = Query("degree", description="Filtration type: degree, centrality, distance"),
+):
+    """
+    Topological analysis using TDA methods.
+
+    Returns:
+        - bettiNumbers: β₀ (components) and β₁ (cycles)
+        - eulerCharacteristic: V - E
+        - cyclomaticComplexity: Number of independent cycles
+        - persistentHomology: (optional) Persistence diagrams
+    """
+    from .analysis.topology import compute_betti_numbers, compute_persistent_homology
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    response_data = {}
+
+    # Betti numbers (always available)
+    betti = compute_betti_numbers(G)
+    response_data["bettiNumbers"] = betti
+
+    # Persistent homology (if gudhi available and graph not too large)
+    if include_persistent_homology and G.number_of_nodes() <= 2000:
+        ph = compute_persistent_homology(G, filtration=filtration)
+        if "error" not in ph and "warning" not in ph:
+            response_data["persistentHomology"] = {
+                "filtration": ph.get("filtration"),
+                "summary": ph.get("summary", {}),
+                "bettiCurve": ph.get("betti_curve", []),
+                # Include raw diagrams for visualization (P2)
+                "diagrams": ph.get("persistence_diagrams", {}),
+            }
+        else:
+            response_data["persistentHomology"] = ph
+    elif include_persistent_homology:
+        response_data["persistentHomology"] = {"note": "Skipped for large graph (>2000 nodes)"}
+
+    return {
+        "status": "ok",
+        "analysis": "topology",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/mapper")
+async def get_mapper_analysis(
+    path: str = Query(..., description="Project path"),
+    filter_func: str = Query("degree", description="Filter function: degree, pagerank, closeness, depth"),
+    num_intervals: int = Query(10, description="Number of intervals"),
+    overlap: float = Query(0.3, description="Overlap fraction (0-0.5)"),
+):
+    """
+    Compute Mapper graph - a simplified topological skeleton. (P2)
+
+    Mapper creates a simplified representation by:
+    1. Applying a filter function for 1D projection
+    2. Covering with overlapping intervals
+    3. Clustering within each interval
+    4. Connecting clusters that share points
+
+    Returns:
+        - mapperNodes: List of Mapper nodes with members
+        - mapperEdges: List of edges between Mapper nodes
+        - summary: Statistics about the Mapper graph
+    """
+    from .analysis.topology import compute_mapper
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    if G.number_of_nodes() > 5000:
+        return {
+            "status": "error",
+            "analysis": "mapper",
+            "error": "Graph too large for Mapper (>5000 nodes)",
+        }
+
+    result = compute_mapper(G, filter_func=filter_func, num_intervals=num_intervals, overlap=overlap)
+
+    if "error" in result:
+        return {
+            "status": "error",
+            "analysis": "mapper",
+            "error": result["error"],
+        }
+
+    return {
+        "status": "ok",
+        "analysis": "mapper",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": {
+            "filterFunction": result.get("filter_function"),
+            "mapperNodes": result.get("mapper_nodes", []),
+            "mapperEdges": result.get("mapper_edges", []),
+            "summary": result.get("summary", {}),
+            "interpretation": result.get("interpretation", ""),
+        },
+    }
+
+
+@app.get("/api/project/analysis/correlations")
+async def get_metric_correlations(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Compute correlation matrix between graph metrics. (P2)
+
+    Returns:
+        - metrics: List of metric names
+        - matrix: Correlation matrix (NxN)
+        - significantPairs: Pairs with p < 0.05
+    """
+    from .analysis import (
+        compute_pagerank,
+        compute_betweenness_centrality,
+        compute_clustering_coefficients,
+    )
+    from .analysis.dag import analyze_dag
+    from .analysis.statistics import compute_metric_correlations
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    # Collect metrics
+    metrics = {}
+
+    # PageRank
+    pr_result = compute_pagerank(G)
+    metrics["pagerank"] = pr_result.values
+
+    # Betweenness
+    bc_result = compute_betweenness_centrality(G)
+    metrics["betweenness"] = bc_result.values
+
+    # Clustering
+    clustering = compute_clustering_coefficients(G)
+    metrics["clustering"] = clustering
+
+    # In-degree
+    metrics["indegree"] = {n: G.in_degree(n) for n in G.nodes()}
+
+    # Out-degree
+    metrics["outdegree"] = {n: G.out_degree(n) for n in G.nodes()}
+
+    # DAG metrics
+    dag_result = analyze_dag(G)
+    if dag_result.get("is_dag", False):
+        metrics["depth"] = dag_result.get("depths", {})
+        metrics["bottleneck"] = dag_result.get("bottleneck_scores", {})
+        metrics["reachability"] = dag_result.get("reachability", {})
+
+    # Compute correlations
+    corr_result = compute_metric_correlations(metrics, method="spearman")
+
+    if "error" in corr_result:
+        return {
+            "status": "error",
+            "analysis": "correlations",
+            "error": corr_result["error"],
+        }
+
+    return {
+        "status": "ok",
+        "analysis": "correlations",
+        "numNodes": G.number_of_nodes(),
+        "data": {
+            "metrics": corr_result.get("metric_names", []),
+            "matrix": corr_result.get("correlation_matrix", []),
+            "significantPairs": corr_result.get("significant_pairs", []),
+        },
+    }
+
+
+@app.get("/api/project/analysis/embedding")
+async def get_embedding_analysis(
+    path: str = Query(..., description="Project path"),
+    method: str = Query("spectral", description="Embedding method: spectral, diffusion"),
+    n_components: int = Query(3, description="Number of dimensions"),
+):
+    """
+    Compute graph embedding for visualization or clustering.
+
+    Methods:
+    - spectral: Based on Laplacian eigenvectors
+    - diffusion: Based on diffusion process on graph
+
+    Returns:
+        - embedding: Dict mapping node -> [x, y, z] coordinates
+    """
+    from .analysis.embedding import compute_spectral_embedding, compute_diffusion_map
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    if method == "spectral":
+        result = compute_spectral_embedding(G, n_components=n_components)
+    elif method == "diffusion":
+        result = compute_diffusion_map(G, n_components=n_components)
+    else:
+        return {
+            "status": "error",
+            "analysis": "embedding",
+            "error": f"Unknown method: {method}",
+        }
+
+    return {
+        "status": "ok",
+        "analysis": "embedding",
+        "method": method,
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": result,
+    }
+
+
+@app.get("/api/project/analysis/patterns")
+async def get_pattern_analysis(
+    path: str = Query(..., description="Project path"),
+    include_motifs: bool = Query(True, description="Count network motifs"),
+    include_proof_patterns: bool = Query(True, description="Find proof-specific patterns"),
+    sample_size: int = Query(1000, description="Sample size for motif significance"),
+):
+    """
+    Pattern recognition in the dependency graph.
+
+    Identifies structural patterns common in mathematical proofs:
+    - Motifs: 3-node and 4-node subgraph patterns
+    - Proof patterns: chains, forks, joins, diamonds
+
+    Returns:
+        - motifs: Counts and z-scores for each motif type
+        - proofPatterns: List of found patterns with locations
+    """
+    from .analysis.pattern import count_motifs_3node, compute_motif_significance, find_proof_patterns
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    response_data = {}
+
+    if include_motifs:
+        motif_counts = count_motifs_3node(G)
+        if "error" not in motif_counts:
+            significance = compute_motif_significance(G, n_random=sample_size)
+            response_data["motifs"] = {
+                "counts": motif_counts,
+                "significance": significance.get("3_node", {}),
+            }
+        else:
+            response_data["motifs"] = motif_counts
+
+    if include_proof_patterns:
+        proof_patterns = find_proof_patterns(G)
+        response_data["proofPatterns"] = proof_patterns
+
+    return {
+        "status": "ok",
+        "analysis": "patterns",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": response_data,
+    }
+
+
+@app.get("/api/project/analysis/embedding-clusters")
+async def get_embedding_clusters(
+    path: str = Query(..., description="Project path"),
+    n_clusters: int = Query(8, description="Number of clusters"),
+):
+    """
+    Compute embedding-based node clusters. (P2)
+
+    Uses spectral embedding + k-means to cluster nodes.
+
+    Returns:
+        - clusters: Dict mapping node_id to cluster_id
+        - clusterSizes: Size of each cluster
+    """
+    from .analysis.embedding import compute_spectral_embedding
+    from sklearn.cluster import KMeans
+    import numpy as np
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    # Get spectral embedding
+    embedding_result = compute_spectral_embedding(G, n_components=min(10, G.number_of_nodes() - 1))
+
+    if "error" in embedding_result:
+        return {
+            "status": "error",
+            "analysis": "embedding-clusters",
+            "error": embedding_result["error"],
+        }
+
+    # Extract embeddings
+    embedding = embedding_result.get("embedding", {})
+    if not embedding:
+        return {
+            "status": "error",
+            "analysis": "embedding-clusters",
+            "error": "No embedding computed",
+        }
+
+    nodes = list(embedding.keys())
+    X = np.array([embedding[n] for n in nodes])
+
+    # K-means clustering
+    n_clusters = min(n_clusters, len(nodes))
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(X)
+
+    # Build result
+    clusters = {nodes[i]: int(labels[i]) for i in range(len(nodes))}
+    cluster_sizes = {}
+    for label in labels:
+        cluster_sizes[int(label)] = cluster_sizes.get(int(label), 0) + 1
+
+    return {
+        "status": "ok",
+        "analysis": "embedding-clusters",
+        "numNodes": G.number_of_nodes(),
+        "data": {
+            "clusters": clusters,
+            "numClusters": n_clusters,
+            "clusterSizes": cluster_sizes,
+        },
+    }
+
+
+@app.get("/api/project/analysis/motif-participation")
+async def get_motif_participation(
+    path: str = Query(..., description="Project path"),
+    max_instances: int = Query(500, description="Max pattern instances to find"),
+):
+    """
+    Compute motif participation for each node. (P2)
+
+    Identifies which patterns each node participates in.
+
+    Returns:
+        - nodeMotifs: Dict mapping node_id to {pattern_type: count}
+        - dominantMotif: Dict mapping node_id to most common motif type
+    """
+    from .analysis.pattern import find_pattern_instances
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    # Find instances of each pattern
+    patterns = ["chain", "fork", "join", "diamond"]
+    node_participation = {n: {} for n in G.nodes()}
+
+    for pattern in patterns:
+        instances = find_pattern_instances(G, pattern, max_instances=max_instances)
+        for instance in instances:
+            for node in instance.get("nodes", []):
+                if node in node_participation:
+                    node_participation[node][pattern] = node_participation[node].get(pattern, 0) + 1
+
+    # Compute dominant motif for each node
+    dominant_motif = {}
+    for node, counts in node_participation.items():
+        if counts:
+            dominant_motif[node] = max(counts, key=counts.get)
+        else:
+            dominant_motif[node] = "none"
+
+    return {
+        "status": "ok",
+        "analysis": "motif-participation",
+        "numNodes": G.number_of_nodes(),
+        "data": {
+            "nodeMotifs": node_participation,
+            "dominantMotif": dominant_motif,
+        },
+    }
+
+
+# ============================================
+# Lean-Specific Analysis Endpoints
+# ============================================
+
+@app.get("/api/project/analysis/lean/types")
+async def get_lean_type_analysis(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Lean type system analysis.
+
+    Analyzes declaration kinds, instances, type hierarchy, and namespace structure.
+
+    Returns:
+        - kindDistribution: Counts and percentages of declaration kinds
+        - instanceAnalysis: Instance statistics and patterns
+        - typeHierarchy: Class/structure inheritance relationships
+        - namespaceTree: Hierarchical namespace structure
+        - topNamespaces: Statistics for largest namespaces
+    """
+    from .analysis.lean_types import analyze_lean_types
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    nodes = list(project.nodes.values())
+
+    result = analyze_lean_types(nodes, G)
+
+    return {
+        "status": "ok",
+        "analysis": "lean_types",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": result,
+    }
+
+
+@app.get("/api/project/analysis/lean/namespaces")
+async def get_lean_namespace_analysis(
+    path: str = Query(..., description="Project path"),
+    depth: int = Query(2, description="Namespace depth for grouping"),
+):
+    """
+    Lean namespace hierarchy analysis.
+
+    Analyzes namespace structure, coupling, and dependencies.
+
+    Returns:
+        - namespaceTree: Hierarchical namespace structure
+        - depthDistribution: How deep namespaces go
+        - sizeDistribution: Declaration counts per namespace
+        - coupling: Module coupling and cohesion metrics
+        - crossDependencies: Cross-namespace dependency patterns
+        - bridges: Declarations that bridge namespaces
+        - circularDependencies: Cycles between namespaces
+    """
+    from .analysis.lean_namespace import analyze_lean_namespaces
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    nodes = list(project.nodes.values())
+
+    result = analyze_lean_namespaces(nodes, G, depth)
+
+    return {
+        "status": "ok",
+        "analysis": "lean_namespaces",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": result,
+    }
+
+
+@app.get("/api/project/analysis/lean/quality")
+async def get_lean_quality_analysis(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Lean code quality analysis.
+
+    Identifies API surface, refactoring candidates, and structural issues.
+
+    Returns:
+        - apiSurface: Public API declarations and stability score
+        - refactoringCandidates: Declarations that might benefit from refactoring
+        - structuralAnomalies: Unusual dependency patterns
+        - bottlenecks: Critical path bottleneck nodes
+        - dependencyChains: Chain length analysis
+        - similarProofs: Potentially duplicated proofs
+    """
+    from .analysis.lean_quality import analyze_lean_quality
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    nodes = list(project.nodes.values())
+
+    result = analyze_lean_quality(nodes, G)
+
+    return {
+        "status": "ok",
+        "analysis": "lean_quality",
+        "numNodes": G.number_of_nodes(),
+        "numEdges": G.number_of_edges(),
+        "data": result,
+    }
+
+
+@app.get("/api/project/analysis/lean/breaking-change")
+async def get_breaking_change_analysis(
+    path: str = Query(..., description="Project path"),
+    declaration_id: str = Query(..., description="Declaration ID to analyze"),
+):
+    """
+    Analyze the impact of changing a specific declaration.
+
+    Returns the direct and transitive dependents that would be affected
+    if the given declaration were modified or removed.
+
+    Returns:
+        - declaration: The analyzed declaration ID
+        - directImpactCount: Number of directly dependent declarations
+        - transitiveImpactCount: Total affected declarations
+        - directDependents: List of directly dependent declaration IDs
+        - impactedNamespaces: Affected namespaces with counts
+        - severity: 'high', 'medium', or 'low'
+    """
+    from .analysis.lean_quality import breaking_change_impact
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+
+    result = breaking_change_impact(G, declaration_id)
+
+    return {
+        "status": "ok",
+        "analysis": "breaking_change",
+        "data": result,
+    }
+
+
+# ============================================
+# Aggregated Metrics API (P0)
+# ============================================
+
+
+@app.get("/api/project/analysis/metrics/all")
+async def get_all_metrics(
+    path: str = Query(..., description="Project path"),
+):
+    """
+    Get aggregated metrics for all nodes in a single request.
+
+    This endpoint combines multiple analysis results to minimize frontend requests.
+    Returns per-node metrics and global statistics.
+
+    Returns:
+        - nodeMetrics: Dict mapping node_id to metric values
+          - pagerank, betweenness, depth, bottleneck, reachability, clustering
+        - globalStats: Graph-wide statistics
+          - graphDepth, modularity, vonNeumannEntropy, density, etc.
+        - kindDistribution: Declaration kind counts (Lean-specific)
+    """
+    from .analysis import (
+        compute_pagerank,
+        compute_betweenness_centrality,
+        compute_clustering_coefficients,
+        compute_von_neumann_entropy,
+        detect_communities_louvain,
+    )
+    from .analysis.dag import analyze_dag
+    from .analysis.lean_types import declaration_kind_distribution
+
+    if path not in _projects:
+        project = get_project(path)
+        await project.load()
+    else:
+        project = _projects[path]
+
+    G = _get_or_build_graph(project)
+    nodes = list(project.nodes.values())
+    num_nodes = G.number_of_nodes()
+    num_edges = G.number_of_edges()
+
+    # Initialize node metrics dict
+    node_metrics: dict[str, dict] = {n: {} for n in G.nodes()}
+
+    # 1. PageRank (always include all values)
+    pagerank_result = compute_pagerank(G, top_k=10)
+    for node_id, value in pagerank_result.values.items():
+        if node_id in node_metrics:
+            node_metrics[node_id]["pagerank"] = value
+
+    # 2. Betweenness (sample-based for large graphs)
+    sample_k = min(1000, num_nodes) if num_nodes > 100 else None
+    betweenness_result = compute_betweenness_centrality(G, k=sample_k, top_k=10)
+    for node_id, value in betweenness_result.values.items():
+        if node_id in node_metrics:
+            node_metrics[node_id]["betweenness"] = value
+
+    # 3. Clustering coefficients
+    clustering_result = compute_clustering_coefficients(G)
+    for node_id, value in clustering_result.local.items():
+        if node_id in node_metrics:
+            node_metrics[node_id]["clustering"] = value
+
+    # 4. DAG analysis (depth, bottleneck, reachability)
+    dag_result = analyze_dag(G)
+    if dag_result.get("is_dag", False):
+        depths = dag_result.get("depths", {})
+        bottlenecks = dag_result.get("bottleneck_scores", {})
+        reachability = dag_result.get("reachability", {})
+
+        for node_id in node_metrics:
+            node_metrics[node_id]["depth"] = depths.get(node_id, 0)
+            node_metrics[node_id]["bottleneck"] = bottlenecks.get(node_id, 0)
+            node_metrics[node_id]["reachability"] = reachability.get(node_id, 0)
+
+    # 5. In-degree (for size mapping)
+    for node_id in node_metrics:
+        node_metrics[node_id]["indegree"] = G.in_degree(node_id)
+
+    # 6. Katz centrality (P2)
+    try:
+        from .analysis.structural import compute_katz_centrality
+        katz = compute_katz_centrality(G, alpha=0.05)  # Lower alpha for better convergence
+        if katz:
+            for node_id, value in katz.items():
+                if node_id in node_metrics:
+                    node_metrics[node_id]["katz"] = value
+    except Exception as e:
+        import logging
+        logging.warning(f"Katz centrality failed: {e}")
+
+    # 7. HITS (hub and authority scores) (P2)
+    try:
+        from .analysis.structural import compute_hits
+        hubs, authorities = compute_hits(G)
+        if hubs:
+            for node_id, value in hubs.items():
+                if node_id in node_metrics:
+                    node_metrics[node_id]["hub"] = value
+        if authorities:
+            for node_id, value in authorities.items():
+                if node_id in node_metrics:
+                    node_metrics[node_id]["authority"] = value
+    except Exception as e:
+        import logging
+        logging.warning(f"HITS failed: {e}")
+
+    # Global statistics
+    global_stats = {
+        "numNodes": num_nodes,
+        "numEdges": num_edges,
+        "density": nx.density(G) if num_nodes > 1 else 0,
+    }
+
+    # DAG-specific global stats
+    if dag_result.get("is_dag", False):
+        global_stats["graphDepth"] = dag_result.get("graph_depth", 0)
+        global_stats["numLayers"] = dag_result.get("num_layers", 0)
+        global_stats["numSources"] = dag_result.get("num_sources", 0)
+        global_stats["numSinks"] = dag_result.get("num_sinks", 0)
+
+    # Community detection for modularity
+    try:
+        community_result = detect_communities_louvain(G.to_undirected())
+        global_stats["modularity"] = community_result.modularity
+        global_stats["numCommunities"] = community_result.num_communities
+    except Exception:
+        global_stats["modularity"] = 0
+        global_stats["numCommunities"] = 0
+
+    # Von Neumann entropy
+    try:
+        entropy_result = compute_von_neumann_entropy(G)
+        global_stats["vonNeumannEntropy"] = entropy_result.get("entropy", 0)
+    except Exception:
+        global_stats["vonNeumannEntropy"] = 0
+
+    # Lean-specific: Declaration kind distribution
+    kind_distribution = {}
+    try:
+        kind_dist = declaration_kind_distribution(nodes)
+        kind_distribution = kind_dist.get("counts", {})
+        global_stats["totalDeclarations"] = kind_dist.get("total", num_nodes)
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "analysis": "metrics_all",
+        "numNodes": num_nodes,
+        "numEdges": num_edges,
+        "data": {
+            "nodeMetrics": node_metrics,
+            "globalStats": global_stats,
+            "kindDistribution": kind_distribution,
+        },
+    }
+
+
+# ============================================
 # Main Entry Point
 # ============================================
 
