@@ -74,7 +74,7 @@ Then open `http://localhost:3000`, click **Load Project**, and select your Lean 
 
 Open an issue or submit a PR. See our [documentation](https://astrolabe-lean.io/docs) for details.
 
-## Maintainers
+## Collaborating Team
 
 **[Xinze Li](https://lixinze.xyz/)**  
 **[Alejandro Radisic](https://github.com/alerad)**
